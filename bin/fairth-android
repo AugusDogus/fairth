@@ -57,11 +57,11 @@ with_adb_key() {
 }
 
 connect_adb() {
-  with_adb_key exec --no-TTY adb adb connect "${adb_endpoint}" >/dev/null
+  with_adb_key exec -T adb adb connect "${adb_endpoint}" >/dev/null
 }
 
 adb_command() {
-  with_adb_key exec --no-TTY adb adb -s "${adb_endpoint}" "$@"
+  with_adb_key exec -T adb adb -s "${adb_endpoint}" "$@"
 }
 
 wait_for_boot() {
@@ -120,8 +120,8 @@ case "${command_name}" in
     connect_adb
     adb_container_id="$(with_adb_key ps --quiet adb)"
     "${runtime}" cp "${apk_path}" "${adb_container_id}:/tmp/fairth-install.apk"
-    with_adb_key exec --no-TTY adb adb -s "${adb_endpoint}" install -r /tmp/fairth-install.apk
-    with_adb_key exec --no-TTY adb rm -f /tmp/fairth-install.apk
+    with_adb_key exec -T adb adb -s "${adb_endpoint}" install -r /tmp/fairth-install.apk
+    with_adb_key exec -T adb rm -f /tmp/fairth-install.apk
     ;;
   logs)
     check
