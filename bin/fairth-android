@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime="${CONTAINER_RUNTIME:-podman}"
+adb_key_path="${ANDROID_ADB_KEY_PATH:-${HOME}/.android/adbkey}"
+adb_port="${ANDROID_ADB_PORT:-5555}"
+adb_endpoint="127.0.0.1:${adb_port}"
+compose=("${runtime}" compose --file "${project_dir}/compose.yaml")
+
+usage() {
+  printf '%s\n' \
+    'Usage: bin/fairth-android <command>' \
+    '' \
+    'Commands:' \
+    '  check          Validate host prerequisites' \
+    '  up             Start Android and wait for it to boot' \
+    '  down           Stop Android while preserving its data volume' \
+    '  status         Show container and Android boot status' \
+    '  shell          Open an ADB shell' \
+    '  install <apk>  Install or update an APK' \
+    '  logs           Follow container logs' \
+    '  reset --yes    Stop Android and permanently remove its data volume'
+}
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "${command_name}" >&2
+    return 1
+  fi
+}
+
+check() {
+  require_command "${runtime}"
+  require_command adb
+
+  if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+    printf '%s\n' '/dev/kvm must be readable and writable by the current user.' >&2
+    return 1
+  fi
+
+  if [[ ! -r "${adb_key_path}" ]]; then
+    printf 'ADB private key is missing or unreadable: %s\n' "${adb_key_path}" >&2
+    printf '%s\n' 'Run adb once to generate a key, or set ANDROID_ADB_KEY_PATH.' >&2
+    return 1
+  fi
+
+  "${runtime}" info >/dev/null
+  printf '%s\n' 'Host prerequisites are ready.'
+}
+
+with_adb_key() {
+  (
+    cd "${project_dir}"
+    ADBKEY="$(<"${adb_key_path}")" "${compose[@]}" "$@"
+  )
+}
+
+connect_adb() {
+  adb connect "${adb_endpoint}" >/dev/null
+}
+
+wait_for_boot() {
+  local attempt
+  local boot_completed
+
+  for attempt in $(seq 1 90); do
+    connect_adb || true
+    boot_completed="$(adb -s "${adb_endpoint}" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    if [[ "${boot_completed}" == "1" ]]; then
+      printf 'Android is ready at %s.\n' "${adb_endpoint}"
+      return 0
+    fi
+    sleep 2
+  done
+
+  printf '%s\n' 'Android did not finish booting within 180 seconds. Inspect bin/fairth-android logs.' >&2
+  return 1
+}
+
+command_name="${1:-}"
+
+case "${command_name}" in
+  check)
+    check
+    ;;
+  up)
+    check
+    with_adb_key up --detach
+    wait_for_boot
+    ;;
+  down)
+    check
+    with_adb_key down
+    ;;
+  status)
+    check
+    with_adb_key ps
+    connect_adb || true
+    adb -s "${adb_endpoint}" shell getprop sys.boot_completed 2>/dev/null \
+      | tr -d '\r' \
+      | sed 's/^/sys.boot_completed=/'
+    ;;
+  shell)
+    check
+    connect_adb
+    adb -s "${adb_endpoint}" shell
+    ;;
+  install)
+    check
+    apk_path="${2:-}"
+    if [[ -z "${apk_path}" || ! -f "${apk_path}" ]]; then
+      printf '%s\n' 'install requires the path to an existing APK.' >&2
+      exit 2
+    fi
+    connect_adb
+    adb -s "${adb_endpoint}" install -r "${apk_path}"
+    ;;
+  logs)
+    check
+    with_adb_key logs --follow
+    ;;
+  reset)
+    check
+    if [[ "${2:-}" != "--yes" ]]; then
+      printf '%s\n' 'reset permanently removes the emulator data volume. Re-run with --yes.' >&2
+      exit 2
+    fi
+    with_adb_key down --volumes
+    ;;
+  help|-h|--help|'')
+    usage
+    ;;
+  *)
+    printf 'Unknown command: %s\n\n' "${command_name}" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
