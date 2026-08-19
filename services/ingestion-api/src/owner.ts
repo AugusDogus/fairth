@@ -29,7 +29,10 @@ function safeNext(value: string): string {
 }
 
 function sameOrigin(request: Request, config: Config): boolean {
-  return request.headers.get("origin") === new URL(config.publicBaseUrl).origin;
+  const expected = new URL(config.publicBaseUrl).origin;
+  const origin = request.headers.get("origin");
+  if (origin !== null && origin !== "null") return origin === expected;
+  return new URL(request.url).origin === expected;
 }
 
 function redirectWithHeaders(location: string, source: Headers): Response {

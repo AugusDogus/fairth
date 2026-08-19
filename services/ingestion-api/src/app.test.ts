@@ -72,6 +72,35 @@ async function fixture() {
 }
 
 describe("ingestion app", () => {
+  test("accepts same-origin browser forms when Android Chrome reports an opaque Origin", async () => {
+    const { app, cleanup } = await fixture();
+    try {
+      const response = await app.request("http://127.0.0.1:3000/owner/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: "null" },
+        body: new URLSearchParams({ email: "owner@example.com", password: "correct horse battery staple", next: "/owner/devices" }),
+      });
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe("/owner/devices");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("rejects owner forms from a different browser origin", async () => {
+    const { app, cleanup } = await fixture();
+    try {
+      const response = await app.request("http://127.0.0.1:3000/owner/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: "https://attacker.example" },
+        body: new URLSearchParams({ email: "owner@example.com", password: "correct horse battery staple" }),
+      });
+      expect(response.status).toBe(403);
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("exposes health without credentials and protects ingestion routes", async () => {
     const { app, cleanup } = await fixture();
     try {
