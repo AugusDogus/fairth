@@ -107,6 +107,16 @@ Google login, Photos settings, Magisk modules, LSPosed state, and PixelMask stat
 
 All upload routes require `Authorization: Bearer <INGESTION_TOKEN>`. `/health` is unauthenticated so local routing and container health checks can probe it.
 
+### Network and authentication model
+
+Do not port-forward the ingestion API. For remote phones, the recommended v1 deployment is Tailscale on the phone and Unraid, with `INGESTION_BIND_ADDRESS` set to the Unraid Tailscale address. Use that device's MagicDNS name or tailnet IP as the companion's remote endpoint. Ordinary tailnet traffic does not require selecting an exit node. An exit node is only for routing the phone's general Internet traffic through another device.
+
+Tailscale Serve is also suitable when an HTTPS name is preferred. Inspect `tailscale serve status` before changing it, because a new root handler can replace an existing service mapping. Keep the bearer token enabled as defense in depth even when tailnet access controls restrict which devices can reach the port.
+
+The v1 token is an appliance credential shared by enrolled companion devices. Hono's bearer middleware performs the token validation, and the companion stores the value in Android Keystore. It does not yet provide per-device expiry or revocation. Better Auth is intentionally deferred until Fairth has an owner sign-in and device-approval screen. At that point its device-authorization and bearer plugins can replace the shared token with revocable device sessions. Adding Better Auth before that lifecycle exists would add user, session, migration, recovery, and secret-management state without providing a usable enrollment flow.
+
+References: [Tailscale exit nodes](https://tailscale.com/kb/1103/exit-nodes/), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [Hono bearer authentication](https://hono.dev/docs/middleware/builtin/bearer-auth), [Better Auth device authorization](https://better-auth.com/docs/plugins/device-authorization).
+
 For a simple complete-file upload:
 
 ```bash
