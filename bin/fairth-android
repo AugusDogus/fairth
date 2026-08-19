@@ -99,8 +99,9 @@ start_appliance() {
   local traefik_enable
   local fairth_hostname
   local traefik_network
-  local binder_root
-  local binder_device
+  local system_server_state
+  local boot_complete
+  local boot_attempt
   local existing_name
   local -a android_arguments
   local -a fairth_arguments
@@ -146,25 +147,6 @@ start_appliance() {
     "${runtime}" network create "${network_name}" >/dev/null
   fi
 
-  if [[ -c /dev/binder && -c /dev/hwbinder && -c /dev/vndbinder ]]; then
-    binder_root=/dev
-  elif grep -qw binder /proc/filesystems 2>/dev/null; then
-    binder_root=/dev/binderfs
-    mkdir -p "${binder_root}"
-    if ! grep -qs " ${binder_root} binder " /proc/mounts; then
-      mount -t binder binder "${binder_root}"
-    fi
-    for binder_device in binder hwbinder vndbinder; do
-      if [[ ! -c "${binder_root}/${binder_device}" ]]; then
-        printf 'Binderfs did not create %s/%s. Check the host binder configuration.\n' "${binder_root}" "${binder_device}" >&2
-        return 1
-      fi
-    done
-  else
-    printf '%s\n' 'Android Binder device nodes are unavailable on this host.' >&2
-    return 1
-  fi
-
   android_arguments=(
     run --detach
     --name "${android_container_name}"
@@ -172,9 +154,8 @@ start_appliance() {
     --restart unless-stopped
     --network "${network_name}"
     --network-alias android
-    --device "${binder_root}/binder:/dev/binder"
-    --device "${binder_root}/hwbinder:/dev/hwbinder"
-    --device "${binder_root}/vndbinder:/dev/vndbinder"
+    # Docker's volume filesystem supplies xattrs missing from some Unraid /dev tmpfs builds.
+    --mount type=volume,destination=/dev/__properties__,volume-nocopy
     --volume "${android_data_path}:/data"
     "${redroid_image}"
     androidboot.hardware=redroid
@@ -183,6 +164,8 @@ start_appliance() {
     "androidboot.redroid_dpi=${dpi}"
     "androidboot.redroid_fps=${fps}"
     androidboot.use_memfd=true
+    ro.lmk.use_psi=false
+    ro.lmk.use_minfree_levels=true
     ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a
     ro.product.cpu.abilist64=x86_64,arm64-v8a
     ro.product.cpu.abilist32=x86,armeabi-v7a
@@ -195,6 +178,23 @@ start_appliance() {
     ro.ndk_translation.version=0.2.3
   )
   "${runtime}" "${android_arguments[@]}" >/dev/null
+
+  # Redroid disables the animation, but Android 11 still waits for its completion signal.
+  boot_complete=""
+  for ((boot_attempt = 0; boot_attempt < 120; boot_attempt += 1)); do
+    system_server_state="$("${runtime}" exec "${android_container_name}" getprop init.svc.system_server 2>/dev/null | tr -d '\r' || true)"
+    if [[ "${system_server_state}" == running ]]; then
+      "${runtime}" exec "${android_container_name}" setprop service.bootanim.exit 1 >/dev/null 2>&1 || true
+    fi
+    boot_complete="$("${runtime}" exec "${android_container_name}" getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    if [[ "${boot_complete}" == 1 ]]; then break; fi
+    sleep 2
+  done
+  if [[ "${boot_complete}" != 1 ]]; then
+    printf '%s\n' 'Android did not finish booting within four minutes. Review the host kernel and Android logs.' >&2
+    "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null 2>&1 || true
+    return 1
+  fi
 
   fairth_arguments=(
     run --detach
@@ -260,7 +260,7 @@ case "${command_name}" in
     for existing_name in "${container_name}" "${android_container_name}"; do
       if "${runtime}" container inspect "${existing_name}" >/dev/null 2>&1; then
         "${runtime}" stop "${existing_name}" >/dev/null
-        "${runtime}" rm "${existing_name}" >/dev/null
+        "${runtime}" rm --volumes "${existing_name}" >/dev/null
       fi
     done
     printf '%s\n' 'Fairth stopped. Persistent volume data was preserved.'

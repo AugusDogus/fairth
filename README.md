@@ -28,11 +28,13 @@ Fairth deploys as two containers on a private Docker network. The non-privileged
 
 ## Important runtime facts
 
-Redroid needs Android Binder support from the host kernel. It does not use `/dev/kvm`. On Unraid, confirm that `/dev/binder` or a compatible Binder setup exists before deploying.
+Redroid needs Android Binder support from the host kernel. It does not use `/dev/kvm`. The launcher lets Redroid create its own isolated Binder devices. It also uses an anonymous Docker volume for Android's runtime property area because stock Unraid kernels can omit tmpfs extended attributes. No host directory or ownership setup is required.
 
 The stock `redroid/redroid` image is AOSP. It does not include Google Mobile Services, Google Photos, Magisk, or ARM translation. Fairth therefore requires `REDROID_IMAGE` to name an image you built or obtained under licenses that permit those packages. The included x86-64 builder uses Android 11 because its GApps and ARM native-bridge path is the combination its upstream builder documents as working. It adds Google Photos from the pinned OpenGApps package, so Photos is present on first boot.
 
 PixelMask does not replace Magisk or Zygisk. It is an LSPosed module, and LSPosed requires Magisk/Zygisk or an equivalent root framework. PixelMask currently publishes an `arm64-v8a` application. An x86-64 Unraid host therefore needs a Redroid image with a working ARM native bridge as well as GApps and Magisk. `bin/fairth-android build-image` uses a pinned revision of the community `redroid-script` project to build that image locally. Review that third-party input and the applicable package licenses before running it. Fairth does not commit or redistribute the resulting proprietary packages.
+
+Some Unraid kernels also omit pressure-stall information. The Fairth image configures Android 11's legacy low-memory mode and makes its phone-oriented low-memory daemon non-critical, so that unavailable host feature cannot force an Android boot loop. Docker removes the anonymous runtime property volume with the container; the named Android `/data` volume remains persistent.
 
 References: [Redroid documentation](https://github.com/remote-android/redroid-doc), [Redroid GMS build notes](https://github.com/remote-android/redroid-doc/tree/master/android-builder-docker), [LSPosed installation](https://github.com/LSPosed/LSPosed/wiki/How-to-use-it), and [PixelMask instructions](https://github.com/Xposed-Modules-Repo/com.kinginu.pixelmask).
 

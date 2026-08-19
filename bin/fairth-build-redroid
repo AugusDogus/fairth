@@ -83,12 +83,13 @@ fi
 photos_archive="${build_directory}/opengapps/GApps/photos-x86_64.tar.lz"
 photos_extract="${build_directory}/photos-extract"
 photos_overlay="${build_directory}/photos-overlay"
+project_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ ! -f "${photos_archive}" ]]; then
   printf '%s\n' 'OpenGApps did not provide the expected Google Photos package.' >&2
   exit 1
 fi
 
-mkdir -p "${photos_extract}" "${photos_overlay}/system/app"
+mkdir -p "${photos_extract}" "${photos_overlay}/system/app" "${photos_overlay}/system/etc/init"
 tar --lzip --extract --file "${photos_archive}" --directory "${photos_extract}"
 photos_directory="$(find "${photos_extract}" -type d -path '*/app/Photos' -print -quit)"
 if [[ -z "${photos_directory}" ]] \
@@ -98,6 +99,7 @@ if [[ -z "${photos_directory}" ]] \
 fi
 
 cp -a "${photos_directory}" "${photos_overlay}/system/app/Photos"
+cp "${project_directory}/deployment/android/lmkd.rc" "${photos_overlay}/system/etc/init/lmkd.rc"
 printf 'FROM %s\nCOPY system /system\n' "${source_image}" \
   | "${runtime}" build --tag "${output_image}" --file - "${photos_overlay}"
 printf 'Redroid image is ready: %s\n' "${output_image}"
