@@ -99,6 +99,7 @@ start_appliance() {
   local traefik_enable
   local fairth_hostname
   local traefik_network
+  local network_gateway
   local system_server_state
   local boot_complete
   local boot_attempt
@@ -146,6 +147,11 @@ start_appliance() {
   if ! "${runtime}" network inspect "${network_name}" >/dev/null 2>&1; then
     "${runtime}" network create "${network_name}" >/dev/null
   fi
+  network_gateway="$("${runtime}" network inspect "${network_name}" --format '{{(index .IPAM.Config 0).Gateway}}')"
+  if [[ ! "${network_gateway}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'The Fairth network did not provide an IPv4 gateway: %s\n' "${network_gateway}" >&2
+    return 1
+  fi
 
   android_arguments=(
     run --detach
@@ -154,6 +160,8 @@ start_appliance() {
     --restart unless-stopped
     --network "${network_name}"
     --network-alias android
+    # ADB stays on the bridge gateway because Android can reject direct peer traffic.
+    --publish "${network_gateway}:5555:5555"
     # Docker's volume filesystem supplies xattrs missing from some Unraid /dev tmpfs builds.
     --mount type=volume,destination=/dev/__properties__,volume-nocopy
     --volume "${android_data_path}:/data"
@@ -226,15 +234,15 @@ start_appliance() {
   fi
   if [[ -f "${env_file}" ]]; then fairth_arguments+=(--env-file "${env_file}"); fi
   fairth_arguments+=(
-    --env ADB_ENDPOINT=android:5555
+    --env "ADB_ENDPOINT=${network_gateway}:5555"
     "${appliance_image}"
   )
   if ! "${runtime}" "${fairth_arguments[@]}" >/dev/null; then
-    "${runtime}" rm --force "${android_container_name}" >/dev/null 2>&1 || true
+    "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null 2>&1 || true
     return 1
   fi
   if [[ "${traefik_enable}" == true ]] && ! "${runtime}" network connect "${traefik_network}" "${container_name}"; then
-    "${runtime}" rm --force "${container_name}" "${android_container_name}" >/dev/null 2>&1 || true
+    "${runtime}" rm --force --volumes "${container_name}" "${android_container_name}" >/dev/null 2>&1 || true
     return 1
   fi
   printf 'Fairth is starting at %s.\n' "$(env_value PUBLIC_BASE_URL "http://localhost:${web_port}")"
@@ -280,8 +288,7 @@ case "${command_name}" in
     "${runtime}" exec "${container_name}" /usr/local/bin/fairth-provision-android
     ;;
   reboot)
-    "${runtime}" exec "${container_name}" adb connect android:5555 >/dev/null || true
-    "${runtime}" exec "${container_name}" adb -s android:5555 reboot
+    "${runtime}" exec "${container_name}" /bin/bash -c 'adb connect "${ADB_ENDPOINT}" >/dev/null || true; adb -s "${ADB_ENDPOINT}" reboot'
     ;;
   logs)
     "${runtime}" logs --follow "${container_name}"
