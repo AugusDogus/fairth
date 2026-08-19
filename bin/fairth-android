@@ -4,128 +4,175 @@ set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime="${CONTAINER_RUNTIME:-docker}"
-adb_key_directory="${ANDROID_ADB_KEY_DIRECTORY:-/mnt/user/appdata/fairth/adb}"
-adb_key_path="${ANDROID_ADB_KEY_PATH:-${adb_key_directory}/adbkey}"
-adb_endpoint="android:5555"
 compose=("${runtime}" compose --file "${project_dir}/compose.yaml")
+adb_endpoint="android:5555"
 
 usage() {
   printf '%s\n' \
     'Usage: bin/fairth-android <command>' \
     '' \
     'Commands:' \
-    '  check          Validate host prerequisites' \
-    '  up             Start Android and wait for it to boot' \
-    '  down           Stop Android while preserving its data volume' \
-    '  status         Show container and Android boot status' \
-    '  shell          Open an ADB shell' \
-    '  install <apk>  Install or update an APK' \
-    '  logs           Follow container logs'
+    '  build-image           Build the pinned GApps + Magisk + native-bridge image' \
+    '  check                 Validate Docker, storage, and Redroid host support' \
+    '  up                    Build and start the complete appliance' \
+    '  onboard               Print the browser setup link and recent setup status' \
+    '  down                  Stop services while preserving data' \
+    '  status                Show Compose and application readiness' \
+    '  shell                 Open an Android shell through the private ADB sidecar' \
+    '  install <apk>         Install or update one Android APK' \
+    '  provision <directory> Install APKs and Magisk modules from an artifact directory' \
+    '  reboot                Reboot Android and wait for it to return' \
+    '  logs [service]        Follow all logs or one service'
 }
 
 require_command() {
-  local command_name="$1"
-
-  if ! command -v "${command_name}" >/dev/null 2>&1; then
-    printf 'Missing required command: %s\n' "${command_name}" >&2
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "$1" >&2
     return 1
   fi
+}
+
+compose_command() {
+  (cd "${project_dir}" && "${compose[@]}" "$@")
 }
 
 check() {
   require_command "${runtime}"
-  if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-    printf '%s\n' '/dev/kvm must be readable and writable by the current user.' >&2
-    return 1
-  fi
-
-  if [[ ! -r "${adb_key_path}" ]]; then
-    printf 'ADB private key is missing or unreadable: %s\n' "${adb_key_path}" >&2
-    printf '%s\n' 'Run adb once to generate a key, or set ANDROID_ADB_KEY_PATH.' >&2
-    return 1
-  fi
-
   "${runtime}" info >/dev/null
-  printf '%s\n' 'Host prerequisites are ready.'
-}
-
-with_adb_key() {
-  (
-    cd "${project_dir}"
-    ADBKEY="$(<"${adb_key_path}")" "${compose[@]}" "$@"
-  )
-}
-
-connect_adb() {
-  with_adb_key exec -T adb adb connect "${adb_endpoint}" >/dev/null
+  if [[ "${runtime}" == podman ]] && [[ "$("${runtime}" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || true)" == true ]]; then
+    printf '%s\n' 'Redroid cannot run in rootless Podman. Use rootful Podman or Docker for the appliance.' >&2
+    return 1
+  fi
+  compose_command config --quiet
+  if [[ ! -e /dev/binder && ! -d /dev/binderfs ]] && ! grep -qw binder /proc/filesystems 2>/dev/null; then
+    printf '%s\n' 'Android Binder support was not found in /dev or /proc/filesystems.' >&2
+    printf '%s\n' 'Load binder_linux with binder,hwbinder,vndbinder or configure equivalent Binder support in the Unraid kernel.' >&2
+    return 1
+  fi
+  printf '%s\n' 'Host prerequisites and Compose configuration are ready.'
 }
 
 adb_command() {
-  with_adb_key exec -T adb adb -s "${adb_endpoint}" "$@"
+  compose_command exec -T importer adb connect "${adb_endpoint}" >/dev/null || true
+  compose_command exec -T importer adb -s "${adb_endpoint}" "$@"
 }
 
 wait_for_boot() {
   local attempt
   local boot_completed
-
-  for attempt in $(seq 1 90); do
-    connect_adb || true
+  for attempt in $(seq 1 120); do
     boot_completed="$(adb_command shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     if [[ "${boot_completed}" == "1" ]]; then
-      printf 'Android is ready at %s.\n' "${adb_endpoint}"
+      printf '%s\n' 'Android is ready.'
       return 0
     fi
     sleep 2
   done
-
-  printf '%s\n' 'Android did not finish booting within 180 seconds. Inspect bin/fairth-android logs.' >&2
+  printf '%s\n' 'Android did not finish booting within 240 seconds. Run bin/fairth-android logs android.' >&2
   return 1
 }
 
-command_name="${1:-}"
+wait_for_setup() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if compose_command exec -T setup-ui curl --fail --insecure --silent https://127.0.0.1:6080/vnc.html >/dev/null 2>&1; then
+      printf '%s\n' 'Browser onboarding is ready.'
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' 'Browser onboarding did not become ready within 60 seconds. Recent setup logs follow.' >&2
+  compose_command logs --no-color --tail 40 setup-ui >&2 || true
+  return 1
+}
 
+install_apk() {
+  local apk_path="$1"
+  local container_id
+  if [[ ! -f "${apk_path}" ]]; then
+    printf 'APK is missing or unreadable: %s\n' "${apk_path}" >&2
+    return 1
+  fi
+  container_id="$(compose_command ps --quiet importer)"
+  "${runtime}" cp "${apk_path}" "${container_id}:/tmp/fairth-install.apk"
+  adb_command install -r /tmp/fairth-install.apk
+  compose_command exec -T --user 0 importer rm -f /tmp/fairth-install.apk
+}
+
+install_module() {
+  local module_path="$1"
+  local container_id
+  container_id="$(compose_command ps --quiet importer)"
+  "${runtime}" cp "${module_path}" "${container_id}:/tmp/fairth-module.zip"
+  adb_command push /tmp/fairth-module.zip /data/local/tmp/fairth-module.zip >/dev/null
+  adb_command shell su -c 'magisk --install-module /data/local/tmp/fairth-module.zip'
+  adb_command shell rm -f /data/local/tmp/fairth-module.zip
+  compose_command exec -T --user 0 importer rm -f /tmp/fairth-module.zip
+}
+
+provision() {
+  local artifact_directory="$1"
+  local artifact
+  if [[ ! -d "${artifact_directory}" ]]; then
+    printf 'Artifact directory is missing: %s\n' "${artifact_directory}" >&2
+    return 1
+  fi
+  if ! adb_command shell su -c 'magisk -v' >/dev/null 2>&1; then
+    printf '%s\n' 'Magisk is not available in this Redroid image. Build or select a GApps + Magisk image before provisioning LSPosed.' >&2
+    return 1
+  fi
+  while IFS= read -r -d '' artifact; do install_apk "${artifact}"; done < <(find "${artifact_directory}/apks" -maxdepth 1 -type f -name '*.apk' -print0 2>/dev/null | sort -z)
+  adb_command shell su -c 'magisk --sqlite "INSERT OR REPLACE INTO settings (key,value) VALUES (\"zygisk\",1);"'
+  while IFS= read -r -d '' artifact; do install_module "${artifact}"; done < <(find "${artifact_directory}/modules" -maxdepth 1 -type f -name '*.zip' -print0 2>/dev/null | sort -z)
+  adb_command reboot || true
+  wait_for_boot
+  printf '%s\n' 'Provisioning files are installed. Finish PixelMask target and LSPosed scope selection in the Android UI, then run status.'
+}
+
+command_name="${1:-}"
 case "${command_name}" in
+  build-image)
+    CONTAINER_RUNTIME="${runtime}" "${project_dir}/bin/fairth-build-redroid"
+    ;;
   check)
     check
     ;;
   up)
     check
-    with_adb_key up --detach
+    compose_command up --detach --build
     wait_for_boot
+    wait_for_setup
+    compose_command logs --no-color --tail 20 setup-ui
+    ;;
+  onboard)
+    compose_command logs --no-color --tail 40 setup-ui
     ;;
   down)
-    check
-    with_adb_key down
+    compose_command down
     ;;
   status)
-    check
-    with_adb_key ps
-    connect_adb || true
-    adb_command shell getprop sys.boot_completed 2>/dev/null \
-      | tr -d '\r' \
-      | sed 's/^/sys.boot_completed=/'
+    compose_command ps
+    printf '\nImporter readiness:\n'
+    compose_command exec -T importer node --input-type=module -e 'const response = await fetch("http://127.0.0.1:3001/ready"); console.log(await response.text()); process.exitCode = response.ok ? 0 : 1' || true
+    printf '\nAndroid packages and root stack:\n'
+    adb_command shell sh -c 'printf "boot="; getprop sys.boot_completed; printf "abi="; getprop ro.product.cpu.abi; printf "native_bridge="; getprop ro.dalvik.vm.native.bridge; for package in com.google.android.apps.photos com.kinginu.pixelmask org.lsposed.manager; do pm path "$package" >/dev/null 2>&1 && echo "$package=installed" || echo "$package=missing"; done; su -c "magisk -v" 2>/dev/null || echo "magisk=missing"' || true
     ;;
   shell)
-    check
-    connect_adb
-    with_adb_key exec adb adb -s "${adb_endpoint}" shell
+    compose_command exec importer adb connect "${adb_endpoint}" >/dev/null || true
+    compose_command exec importer adb -s "${adb_endpoint}" shell
     ;;
   install)
-    check
-    apk_path="${2:-}"
-    if [[ -z "${apk_path}" || ! -f "${apk_path}" ]]; then
-      printf '%s\n' 'install requires the path to an existing APK.' >&2
-      exit 2
-    fi
-    connect_adb
-    adb_container_id="$(with_adb_key ps --quiet adb)"
-    "${runtime}" cp "${apk_path}" "${adb_container_id}:/tmp/fairth-install.apk"
-    with_adb_key exec -T adb adb -s "${adb_endpoint}" install -r /tmp/fairth-install.apk
-    with_adb_key exec -T adb rm -f /tmp/fairth-install.apk
+    install_apk "${2:-}"
+    ;;
+  provision)
+    provision "${2:-}"
+    ;;
+  reboot)
+    adb_command reboot || true
+    wait_for_boot
     ;;
   logs)
-    check
-    with_adb_key logs --follow
+    if [[ -n "${2:-}" ]]; then compose_command logs --follow "$2"; else compose_command logs --follow; fi
     ;;
   help|-h|--help|'')
     usage

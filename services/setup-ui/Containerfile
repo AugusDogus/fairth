@@ -1,0 +1,33 @@
+FROM debian:bookworm-slim
+
+ARG SCRCPY_VERSION=4.1
+ARG SCRCPY_SHA256=ad56ae8bfeedf41e824945c11dbf55fcb092b3e615b9b486f48a50e30d389635
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      adb \
+      ca-certificates \
+      curl \
+      novnc \
+      openbox \
+      openssl \
+      websockify \
+      x11vnc \
+      xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --fail --location --show-error \
+      "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-linux-x86_64-v${SCRCPY_VERSION}.tar.gz" \
+      --output /tmp/scrcpy.tar.gz \
+    && printf '%s  %s\n' "${SCRCPY_SHA256}" /tmp/scrcpy.tar.gz | sha256sum --check --strict \
+    && mkdir -p /opt/scrcpy \
+    && tar --extract --gzip --file /tmp/scrcpy.tar.gz --directory /opt/scrcpy --strip-components=1 \
+    && ln -s /opt/scrcpy/scrcpy /usr/local/bin/scrcpy \
+    && rm /tmp/scrcpy.tar.gz
+
+COPY services/setup-ui/entrypoint.sh /usr/local/bin/fairth-setup-ui
+
+RUN chmod 0755 /usr/local/bin/fairth-setup-ui
+
+EXPOSE 6080
+
+ENTRYPOINT ["/usr/local/bin/fairth-setup-ui"]

@@ -1,3 +1,8 @@
 .env
 .git
 android-data
+node_modules
+companion/node_modules
+companion/android
+**/dist
+*.sqlite*

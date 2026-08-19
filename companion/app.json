@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Fairth Companion",
+    "slug": "fairth-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "dev.fairth.companion",
+      "permissions": [
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Fairth needs photo access to find and upload the media you select.",
+          "savePhotosPermission": "Fairth does not modify your photo library."
+        }
+      ],
+      "expo-secure-store",
+      "expo-background-task",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
+  }
+}

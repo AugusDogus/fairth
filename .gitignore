@@ -1,2 +1,12 @@
 .env
-
+node_modules/
+dist/
+coverage/
+.expo/
+companion/android/
+companion/.env
+artifacts/apks/
+artifacts/modules/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

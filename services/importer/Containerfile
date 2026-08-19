@@ -1,0 +1,18 @@
+FROM docker.io/library/node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY services/importer/package.json services/importer/tsconfig.json ./services/importer/
+RUN npm ci
+COPY services/importer/src ./services/importer/src
+RUN npm run build --workspace @fairth/importer
+
+FROM docker.io/library/node:24-bookworm-slim
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends adb ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/services/importer/dist ./dist
+RUN mkdir -p /data /incoming && chown -R node:node /data /incoming
+USER node
+CMD ["node", "dist/main.js"]

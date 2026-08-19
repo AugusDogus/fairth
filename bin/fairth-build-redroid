@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+runtime="${CONTAINER_RUNTIME:-docker}"
+redroid_script_commit="1004fc4062978c26cafe063d3fcc7357e3921c78"
+redroid_script_url="https://github.com/ayasa520/redroid-script.git"
+source_image="redroid/redroid:11.0.0_gapps_ndk_magisk"
+output_image="${FAIRTH_REDROID_IMAGE:-localhost/fairth-redroid:11-gapps-ndk-magisk}"
+build_directory="$(mktemp -d /tmp/fairth-redroid-build.XXXXXX)"
+
+cleanup() {
+  case "${build_directory}" in
+    /tmp/fairth-redroid-build.*) rm -rf -- "${build_directory}" ;;
+  esac
+}
+
+trap cleanup EXIT
+
+for command_name in git lzip python3 "${runtime}"; do
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    printf 'Missing image-build dependency: %s\n' "${command_name}" >&2
+    exit 1
+  fi
+done
+
+printf '%s\n' \
+  'Building a local Redroid image with OpenGApps, Magisk, and ARM translation.' \
+  "Pinned image-overlay builder commit: ${redroid_script_commit}"
+
+git clone --quiet "${redroid_script_url}" "${build_directory}/redroid-script"
+git -C "${build_directory}/redroid-script" checkout --quiet --detach "${redroid_script_commit}"
+if [[ "$(git -C "${build_directory}/redroid-script" rev-parse HEAD)" != "${redroid_script_commit}" ]]; then
+  printf '%s\n' 'The checked-out image builder does not match the pinned commit.' >&2
+  exit 1
+fi
+
+python3 -m venv "${build_directory}/venv"
+"${build_directory}/venv/bin/pip" install --quiet --disable-pip-version-check \
+  --requirement "${build_directory}/redroid-script/requirements.txt"
+
+if [[ "${runtime}" == podman ]]; then
+  sed -i 's|FROM redroid/redroid:|FROM docker.io/redroid/redroid:|' \
+    "${build_directory}/redroid-script/redroid.py"
+fi
+
+(
+  cd "${build_directory}/redroid-script"
+  "${build_directory}/venv/bin/python" redroid.py \
+    --android-version 11.0.0 \
+    --install-gapps \
+    --install-ndk-translation \
+    --install-magisk \
+    --container "${runtime}"
+)
+
+if ! "${runtime}" image inspect "${source_image}" >/dev/null 2>&1; then
+  printf '%s\n' 'The image-overlay builder finished without producing its expected image.' >&2
+  exit 1
+fi
+
+"${runtime}" tag "${source_image}" "${output_image}"
+printf 'Redroid image is ready: %s\n' "${output_image}"

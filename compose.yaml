@@ -2,26 +2,123 @@ name: fairth
 
 services:
   android:
-    image: ${ANDROID_EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/29-google-x64-no-metrics:30.1.2}
-    devices:
-      - /dev/kvm:/dev/kvm
-    environment:
-      ADBKEY: ${ADBKEY:?Set ADBKEY to the contents of an Android ADB private key}
-      EMULATOR_PARAMS: ${EMULATOR_PARAMS:--no-window -no-audio -no-boot-anim -gpu swiftshader_indirect}
+    image: ${REDROID_IMAGE:?Set REDROID_IMAGE to a compatible GApps Redroid image in .env}
+    privileged: true
+    command:
+      - androidboot.redroid_width=${ANDROID_WIDTH:-1080}
+      - androidboot.redroid_height=${ANDROID_HEIGHT:-2400}
+      - androidboot.redroid_dpi=${ANDROID_DPI:-420}
+      - androidboot.redroid_fps=${ANDROID_FPS:-30}
+      - androidboot.use_memfd=true
+      - ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a
+      - ro.product.cpu.abilist64=x86_64,arm64-v8a
+      - ro.product.cpu.abilist32=x86,armeabi-v7a
+      - ro.dalvik.vm.isa.arm=x86
+      - ro.dalvik.vm.isa.arm64=x86_64
+      - ro.enable.native.bridge.exec=1
+      - ro.vendor.enable.native.bridge.exec=1
+      - ro.vendor.enable.native.bridge.exec64=1
+      - ro.dalvik.vm.native.bridge=libndk_translation.so
+      - ro.ndk_translation.version=0.2.3
     ports:
       - 127.0.0.1:${ANDROID_ADB_PORT:-5555}:5555
-      - 127.0.0.1:${ANDROID_GRPC_PORT:-8554}:8554
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$(getprop sys.boot_completed)\" = 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     volumes:
       - ${ANDROID_DATA_PATH:-/mnt/user/appdata/fairth/android-data}:/data
+    networks:
+      - android-backend
 
-  adb:
+  setup-ui:
     build:
       context: .
-      dockerfile: docker/adb/Containerfile
-    command: ["sleep", "infinity"]
+      dockerfile: services/setup-ui/Containerfile
     depends_on:
-      - android
+      android:
+        condition: service_healthy
+    environment:
+      ADB_ENDPOINT: android:5555
+      SETUP_PASSWORD: ${SETUP_PASSWORD:?Set a private SETUP_PASSWORD in .env}
+      SETUP_PUBLIC_URL: ${SETUP_PUBLIC_URL:-https://unraid.local:6080/vnc.html?autoconnect=1&resize=scale}
+      SETUP_STATE_DIRECTORY: /state
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--insecure", "--silent", "https://127.0.0.1:6080/vnc.html"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    ports:
+      - ${SETUP_BIND_ADDRESS:-0.0.0.0}:${SETUP_PORT:-6080}:6080
     restart: unless-stopped
     volumes:
-      - ${ANDROID_ADB_KEY_DIRECTORY:-/mnt/user/appdata/fairth/adb}:/root/.android
+      - ./artifacts:/artifacts:ro
+      - ${SETUP_DATA_PATH:-/mnt/user/appdata/fairth/setup}:/state
+    networks:
+      - android-backend
+
+  ingestion-api:
+    build:
+      context: .
+      dockerfile: services/ingestion-api/Containerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      INCOMING_ROOT: /incoming
+      INGESTION_TOKEN: ${INGESTION_TOKEN:?Set a long random INGESTION_TOKEN in .env}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-53687091200}
+      UPLOAD_CHUNK_BYTES: ${UPLOAD_CHUNK_BYTES:-8388608}
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+    ports:
+      - ${INGESTION_BIND_ADDRESS:-0.0.0.0}:${INGESTION_PORT:-3000}:3000
+    restart: unless-stopped
+    user: ${SERVICE_UID:-99}:${SERVICE_GID:-100}
+    volumes:
+      - ${INCOMING_PATH:-/mnt/user/photos-incoming}:/incoming
+    networks:
+      - ingestion
+
+  importer:
+    build:
+      context: .
+      dockerfile: services/importer/Containerfile
+    depends_on:
+      - android
+    environment:
+      ADB_ENDPOINT: android:5555
+      ANDROID_MEDIA_DIRECTORY: /storage/emulated/0/DCIM/Incoming
+      GOOGLE_PHOTOS_PACKAGE: com.google.android.apps.photos
+      HEALTH_PORT: 3001
+      HOME: /data/home
+      IMPORTER_DATA: /data
+      INCOMING_ROOT: /incoming
+      POLL_INTERVAL_MS: ${IMPORTER_POLL_INTERVAL_MS:-5000}
+      STABLE_FOR_MS: ${IMPORTER_STABLE_FOR_MS:-15000}
+      MAX_RETRIES: ${IMPORTER_MAX_RETRIES:-8}
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 4
+      start_period: 90s
+    ports:
+      - 127.0.0.1:${IMPORTER_HEALTH_PORT:-3001}:3001
+    restart: unless-stopped
+    user: ${SERVICE_UID:-99}:${SERVICE_GID:-100}
+    volumes:
+      - ${INCOMING_PATH:-/mnt/user/photos-incoming}:/incoming
+      - ${IMPORTER_DATA_PATH:-/mnt/user/appdata/fairth/importer}:/data
+    networks:
+      - android-backend
+
+networks:
+  android-backend:
+  ingestion:
