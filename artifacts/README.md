@@ -13,6 +13,6 @@ artifacts/
     └── LSPosed Zygisk release ZIP
 ```
 
-The selected Redroid image must already contain a working, licensed GApps installation and Magisk. The browser setup service automatically installs every APK and then every Magisk module in lexical order, enables Zygisk, and reboots Android. `bin/fairth-android provision artifacts` provides the same operation as a manual recovery command.
+The selected Redroid image must already contain a working, licensed GApps installation and Magisk. The Android worker automatically installs every APK and then every Magisk module in lexical order, enables Zygisk, and reboots Android. Run `bin/fairth-android reconcile` to retry automatic provisioning after changing the artifacts.
 
-PixelMask's current package name is `com.kinginu.pixelmask`. In LSPosed Manager, enable it and scope it to both PixelMask itself and `com.google.android.apps.photos`, as required by PixelMask's own instructions.
+PixelMask's current package name is `com.kinginu.pixelmask`. After installation, Fairth enables it in LSPosed, scopes it to PixelMask and `com.google.android.apps.photos`, restarts Android, and verifies those rows. The worker changes only PixelMask's LSPosed module and scope records.

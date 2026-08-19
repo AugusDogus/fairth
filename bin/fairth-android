@@ -4,192 +4,266 @@ set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime="${CONTAINER_RUNTIME:-docker}"
-compose=("${runtime}" compose --file "${project_dir}/compose.yaml")
-adb_endpoint="android:5555"
+container_name="${FAIRTH_CONTAINER_NAME:-fairth}"
+android_container_name="${ANDROID_CONTAINER_NAME:-fairth-android}"
+appliance_image="${FAIRTH_IMAGE:-localhost/fairth:latest}"
+redroid_image="${REDROID_IMAGE:-localhost/fairth-redroid:11-gapps-ndk-magisk}"
+network_name="${FAIRTH_NETWORK:-fairth}"
+env_file="${project_dir}/.env"
 
 usage() {
   printf '%s\n' \
     'Usage: bin/fairth-android <command>' \
     '' \
     'Commands:' \
-    '  build-image           Build the pinned GApps + Magisk + native-bridge image' \
-    '  check                 Validate Docker, storage, and Redroid host support' \
-    '  up                    Build and start the complete appliance' \
-    '  onboard               Print Android and owner setup links' \
-    '  down                  Stop services while preserving data' \
-    '  status                Show Compose and application readiness' \
-    '  shell                 Open an Android shell through the private ADB sidecar' \
-    '  install <apk>         Install or update one Android APK' \
-    '  provision <directory> Install APKs and Magisk modules from an artifact directory' \
-    '  reboot                Reboot Android and wait for it to return' \
-    '  logs [service]        Follow all logs or one service'
+    '  build-image  Build the local Redroid and Fairth images' \
+    '  build        Build the Fairth application image' \
+    '  check        Validate Docker, both images, and Redroid host support' \
+    '  up           Start Redroid and Fairth on a private Docker network' \
+    '  down         Remove both containers while preserving named-volume data' \
+    '  status       Show both containers, web, worker, and Android readiness' \
+    '  onboard      Print recent first-run and viewer logs' \
+    '  shell        Open a shell inside the Android container' \
+    '  reconcile    Retry automatic Android provisioning' \
+    '  reboot       Reboot Android' \
+    '  logs         Follow Fairth application logs' \
+    '  android-logs Follow Android logs'
 }
 
-require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    printf 'Missing required command: %s\n' "$1" >&2
+require_runtime() {
+  if ! command -v "${runtime}" >/dev/null 2>&1; then
+    printf 'Missing required container runtime: %s\n' "${runtime}" >&2
     return 1
   fi
-}
-
-compose_command() {
-  (cd "${project_dir}" && "${compose[@]}" "$@")
-}
-
-check() {
-  require_command "${runtime}"
   "${runtime}" info >/dev/null
+}
+
+env_value() {
+  local name="$1"
+  local fallback="$2"
+  local value
+  if [[ -f "${env_file}" ]]; then
+    value="$(sed -n "s/^${name}=//p" "${env_file}" | tail -n 1 | tr -d '\r')"
+  else
+    value=""
+  fi
+  printf '%s' "${value:-${fallback}}"
+}
+
+container_name="$(env_value FAIRTH_CONTAINER_NAME "${container_name}")"
+android_container_name="$(env_value ANDROID_CONTAINER_NAME "${android_container_name}")"
+appliance_image="$(env_value FAIRTH_IMAGE "${appliance_image}")"
+redroid_image="$(env_value REDROID_IMAGE "${redroid_image}")"
+network_name="$(env_value FAIRTH_NETWORK "${network_name}")"
+
+build_appliance() {
+  require_runtime
+  "${runtime}" build \
+    --tag "${appliance_image}" \
+    "${project_dir}"
+}
+
+check_host() {
+  require_runtime
   if [[ "${runtime}" == podman ]] && [[ "$("${runtime}" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || true)" == true ]]; then
-    printf '%s\n' 'Redroid cannot run in rootless Podman. Use rootful Podman or Docker for the appliance.' >&2
+    printf '%s\n' 'Redroid cannot run in rootless Podman. Use rootful Podman or Docker.' >&2
     return 1
   fi
-  compose_command config --quiet
   if [[ ! -e /dev/binder && ! -d /dev/binderfs ]] && ! grep -qw binder /proc/filesystems 2>/dev/null; then
-    printf '%s\n' 'Android Binder support was not found in /dev or /proc/filesystems.' >&2
-    printf '%s\n' 'Load binder_linux with binder,hwbinder,vndbinder or configure equivalent Binder support in the Unraid kernel.' >&2
+    printf '%s\n' 'Android Binder support was not found. Configure binder_linux on the Unraid host.' >&2
     return 1
   fi
-  printf '%s\n' 'Host prerequisites and Compose configuration are ready.'
+  if ! "${runtime}" image inspect "${appliance_image}" >/dev/null 2>&1; then
+    printf 'Fairth image is missing: %s. Run bin/fairth-android build-image.\n' "${appliance_image}" >&2
+    return 1
+  fi
+  if ! "${runtime}" image inspect "${redroid_image}" >/dev/null 2>&1; then
+    printf 'Redroid image is missing: %s. Run bin/fairth-android build-image.\n' "${redroid_image}" >&2
+    return 1
+  fi
+  printf '%s\n' 'The host and both Fairth images are ready.'
 }
 
-adb_command() {
-  compose_command exec -T importer adb connect "${adb_endpoint}" >/dev/null || true
-  compose_command exec -T importer adb -s "${adb_endpoint}" "$@"
-}
+start_appliance() {
+  local data_path
+  local android_data_path
+  local incoming_path
+  local web_bind
+  local web_port
+  local viewer_bind
+  local viewer_port
+  local width
+  local height
+  local dpi
+  local fps
+  local traefik_enable
+  local fairth_hostname
+  local traefik_network
+  local existing_name
+  local -a android_arguments
+  local -a fairth_arguments
 
-wait_for_boot() {
-  local attempt
-  local boot_completed
-  for attempt in $(seq 1 120); do
-    boot_completed="$(adb_command shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-    if [[ "${boot_completed}" == "1" ]]; then
-      printf '%s\n' 'Android is ready.'
-      return 0
+  check_host
+  for existing_name in "${android_container_name}" "${container_name}"; do
+    if "${runtime}" container inspect "${existing_name}" >/dev/null 2>&1; then
+      printf 'Container %s already exists. Run bin/fairth-android down first.\n' "${existing_name}" >&2
+      return 1
     fi
-    sleep 2
   done
-  printf '%s\n' 'Android did not finish booting within 240 seconds. Run bin/fairth-android logs android.' >&2
-  return 1
-}
 
-wait_for_setup() {
-  local attempt
-  for attempt in $(seq 1 30); do
-    if compose_command exec -T setup-ui curl --fail --insecure --silent https://127.0.0.1:6080/vnc.html >/dev/null 2>&1; then
-      printf '%s\n' 'Browser onboarding is ready.'
-      return 0
+  data_path="$(env_value FAIRTH_DATA_PATH fairth-data)"
+  android_data_path="$(env_value ANDROID_DATA_PATH fairth-android-data)"
+  incoming_path="$(env_value INCOMING_PATH fairth-incoming)"
+  web_bind="$(env_value WEB_BIND_ADDRESS 0.0.0.0)"
+  web_port="$(env_value WEB_PORT 3000)"
+  viewer_bind="$(env_value ANDROID_VIEWER_BIND_ADDRESS 0.0.0.0)"
+  viewer_port="$(env_value ANDROID_VIEWER_PORT 6080)"
+  width="$(env_value ANDROID_WIDTH 1080)"
+  height="$(env_value ANDROID_HEIGHT 2400)"
+  dpi="$(env_value ANDROID_DPI 420)"
+  fps="$(env_value ANDROID_FPS 30)"
+  traefik_enable="$(env_value TRAEFIK_ENABLE false)"
+  fairth_hostname="$(env_value FAIRTH_HOSTNAME '')"
+  traefik_network="$(env_value TRAEFIK_NETWORK traefik)"
+
+  if [[ "${traefik_enable}" == true ]]; then
+    if [[ -z "${fairth_hostname}" ]]; then
+      printf '%s\n' 'FAIRTH_HOSTNAME is required when TRAEFIK_ENABLE=true.' >&2
+      return 1
     fi
-    sleep 2
-  done
-  printf '%s\n' 'Browser onboarding did not become ready within 60 seconds. Recent setup logs follow.' >&2
-  compose_command logs --no-color --tail 40 setup-ui >&2 || true
-  return 1
-}
-
-wait_for_ingestion() {
-  local attempt
-  for attempt in $(seq 1 30); do
-    if compose_command exec -T ingestion-api bun -e 'const response = await fetch("http://127.0.0.1:3000/health"); process.exit(response.ok ? 0 : 1)' >/dev/null 2>&1; then
-      printf '%s\n' 'Ingestion and owner setup are ready.'
-      return 0
+    if [[ "${traefik_network}" == "${network_name}" ]]; then
+      printf '%s\n' 'TRAEFIK_NETWORK must differ from FAIRTH_NETWORK so Android remains isolated.' >&2
+      return 1
     fi
-    sleep 2
-  done
-  printf '%s\n' 'Ingestion did not become ready within 60 seconds. Recent ingestion logs follow.' >&2
-  compose_command logs --no-color --tail 40 ingestion-api >&2 || true
-  return 1
-}
+    if ! "${runtime}" network inspect "${traefik_network}" >/dev/null 2>&1; then
+      printf 'Traefik network does not exist: %s. Create it before starting Fairth.\n' "${traefik_network}" >&2
+      return 1
+    fi
+  fi
+  if ! "${runtime}" network inspect "${network_name}" >/dev/null 2>&1; then
+    "${runtime}" network create "${network_name}" >/dev/null
+  fi
 
-install_apk() {
-  local apk_path="$1"
-  local container_id
-  if [[ ! -f "${apk_path}" ]]; then
-    printf 'APK is missing or unreadable: %s\n' "${apk_path}" >&2
+  android_arguments=(
+    run --detach
+    --name "${android_container_name}"
+    --privileged
+    --restart unless-stopped
+    --network "${network_name}"
+    --network-alias android
+    --volume "${android_data_path}:/data"
+    "${redroid_image}"
+    androidboot.hardware=redroid
+    "androidboot.redroid_width=${width}"
+    "androidboot.redroid_height=${height}"
+    "androidboot.redroid_dpi=${dpi}"
+    "androidboot.redroid_fps=${fps}"
+    androidboot.use_memfd=true
+    ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a
+    ro.product.cpu.abilist64=x86_64,arm64-v8a
+    ro.product.cpu.abilist32=x86,armeabi-v7a
+    ro.dalvik.vm.isa.arm=x86
+    ro.dalvik.vm.isa.arm64=x86_64
+    ro.enable.native.bridge.exec=1
+    ro.vendor.enable.native.bridge.exec=1
+    ro.vendor.enable.native.bridge.exec64=1
+    ro.dalvik.vm.native.bridge=libndk_translation.so
+    ro.ndk_translation.version=0.2.3
+  )
+  "${runtime}" "${android_arguments[@]}" >/dev/null
+
+  fairth_arguments=(
+    run --detach
+    --name "${container_name}"
+    --restart unless-stopped
+    --network "${network_name}"
+    --publish "${web_bind}:${web_port}:3000"
+    --publish "${viewer_bind}:${viewer_port}:6080"
+    --volume "${data_path}:/data"
+    --volume "${incoming_path}:/incoming"
+    --volume "${project_dir}/artifacts:/artifacts:ro"
+  )
+  if [[ "${traefik_enable}" == true ]]; then
+    fairth_arguments+=(
+      --label traefik.enable=true
+      --label "traefik.docker.network=${traefik_network}"
+      --label "traefik.http.middlewares.fairth-web-body-limit.buffering.maxRequestBodyBytes=$(env_value TRAEFIK_MAX_REQUEST_BODY_BYTES 16777216)"
+      --label "traefik.http.middlewares.fairth-web-rate-limit.ratelimit.average=$(env_value TRAEFIK_RATE_LIMIT_AVERAGE 50)"
+      --label "traefik.http.middlewares.fairth-web-rate-limit.ratelimit.burst=$(env_value TRAEFIK_RATE_LIMIT_BURST 100)"
+      --label traefik.http.middlewares.fairth-web-rate-limit.ratelimit.period=1s
+      --label "traefik.http.routers.fairth-web.entrypoints=$(env_value TRAEFIK_ENTRYPOINT websecure)"
+      --label traefik.http.routers.fairth-web.middlewares=fairth-web-rate-limit@docker,fairth-web-body-limit@docker
+      --label "traefik.http.routers.fairth-web.rule=Host(\`${fairth_hostname}\`)"
+      --label traefik.http.routers.fairth-web.service=fairth-web
+      --label traefik.http.routers.fairth-web.tls=true
+      --label "traefik.http.routers.fairth-web.tls.certresolver=$(env_value TRAEFIK_CERT_RESOLVER letsencrypt)"
+      --label traefik.http.services.fairth-web.loadbalancer.server.port=3000
+    )
+  fi
+  if [[ -f "${env_file}" ]]; then fairth_arguments+=(--env-file "${env_file}"); fi
+  fairth_arguments+=(
+    --env ADB_ENDPOINT=android:5555
+    "${appliance_image}"
+  )
+  if ! "${runtime}" "${fairth_arguments[@]}" >/dev/null; then
+    "${runtime}" rm --force "${android_container_name}" >/dev/null 2>&1 || true
     return 1
   fi
-  container_id="$(compose_command ps --quiet importer)"
-  "${runtime}" cp "${apk_path}" "${container_id}:/tmp/fairth-install.apk"
-  adb_command install -r /tmp/fairth-install.apk
-  compose_command exec -T --user 0 importer rm -f /tmp/fairth-install.apk
-}
-
-install_module() {
-  local module_path="$1"
-  local container_id
-  container_id="$(compose_command ps --quiet importer)"
-  "${runtime}" cp "${module_path}" "${container_id}:/tmp/fairth-module.zip"
-  adb_command push /tmp/fairth-module.zip /data/local/tmp/fairth-module.zip >/dev/null
-  adb_command shell su -c 'magisk --install-module /data/local/tmp/fairth-module.zip'
-  adb_command shell rm -f /data/local/tmp/fairth-module.zip
-  compose_command exec -T --user 0 importer rm -f /tmp/fairth-module.zip
-}
-
-provision() {
-  local artifact_directory="$1"
-  local artifact
-  if [[ ! -d "${artifact_directory}" ]]; then
-    printf 'Artifact directory is missing: %s\n' "${artifact_directory}" >&2
+  if [[ "${traefik_enable}" == true ]] && ! "${runtime}" network connect "${traefik_network}" "${container_name}"; then
+    "${runtime}" rm --force "${container_name}" "${android_container_name}" >/dev/null 2>&1 || true
     return 1
   fi
-  if ! adb_command shell su -c 'magisk -v' >/dev/null 2>&1; then
-    printf '%s\n' 'Magisk is not available in this Redroid image. Build or select a GApps + Magisk image before provisioning LSPosed.' >&2
-    return 1
-  fi
-  while IFS= read -r -d '' artifact; do install_apk "${artifact}"; done < <(find "${artifact_directory}/apks" -maxdepth 1 -type f -name '*.apk' -print0 2>/dev/null | sort -z)
-  adb_command shell su -c 'magisk --sqlite "INSERT OR REPLACE INTO settings (key,value) VALUES (\"zygisk\",1);"'
-  while IFS= read -r -d '' artifact; do install_module "${artifact}"; done < <(find "${artifact_directory}/modules" -maxdepth 1 -type f -name '*.zip' -print0 2>/dev/null | sort -z)
-  adb_command reboot || true
-  wait_for_boot
-  printf '%s\n' 'Provisioning files are installed. Finish PixelMask target and LSPosed scope selection in the Android UI, then run status.'
+  printf 'Fairth is starting at %s.\n' "$(env_value PUBLIC_BASE_URL "http://localhost:${web_port}")"
+  printf 'Android viewer: %s\n' "$(env_value ANDROID_VIEWER_URL "http://localhost:${viewer_port}/vnc.html?autoconnect=1&resize=scale")"
 }
 
 command_name="${1:-}"
 case "${command_name}" in
   build-image)
-    CONTAINER_RUNTIME="${runtime}" "${project_dir}/bin/fairth-build-redroid"
+    CONTAINER_RUNTIME="${runtime}" FAIRTH_REDROID_IMAGE="${redroid_image}" "${project_dir}/bin/fairth-build-redroid"
+    build_appliance
+    ;;
+  build)
+    build_appliance
     ;;
   check)
-    check
+    check_host
     ;;
   up)
-    check
-    compose_command up --detach --build
-    wait_for_boot
-    wait_for_setup
-    wait_for_ingestion
-    compose_command logs --no-color --tail 20 setup-ui
-    compose_command logs --no-color --tail 20 ingestion-api
-    ;;
-  onboard)
-    compose_command logs --no-color --tail 40 setup-ui
-    compose_command logs --no-color --tail 40 ingestion-api
+    start_appliance
     ;;
   down)
-    compose_command down
+    for existing_name in "${container_name}" "${android_container_name}"; do
+      if "${runtime}" container inspect "${existing_name}" >/dev/null 2>&1; then
+        "${runtime}" stop "${existing_name}" >/dev/null
+        "${runtime}" rm "${existing_name}" >/dev/null
+      fi
+    done
+    printf '%s\n' 'Fairth stopped. Persistent volume data was preserved.'
     ;;
   status)
-    compose_command ps
-    printf '\nImporter readiness:\n'
-    compose_command exec -T importer bun -e 'const response = await fetch("http://127.0.0.1:3001/ready"); console.log(await response.text()); process.exitCode = response.ok ? 0 : 1' || true
-    printf '\nAndroid packages and root stack:\n'
-    adb_command shell sh -c 'printf "boot="; getprop sys.boot_completed; printf "abi="; getprop ro.product.cpu.abi; printf "native_bridge="; getprop ro.dalvik.vm.native.bridge; for package in com.google.android.apps.photos com.kinginu.pixelmask org.lsposed.manager; do pm path "$package" >/dev/null 2>&1 && echo "$package=installed" || echo "$package=missing"; done; su -c "magisk -v" 2>/dev/null || echo "magisk=missing"' || true
+    "${runtime}" ps --filter "name=^${container_name}$" --filter "name=^${android_container_name}$"
+    "${runtime}" exec "${container_name}" bun -e 'for (const [name,url] of [["web","http://127.0.0.1:3000/health"],["worker","http://127.0.0.1:3001/ready"]]) { try { const response=await fetch(url); console.log(name, response.status, await response.text()); } catch (error) { console.log(name, "unreachable", error.message); } }'
+    "${runtime}" exec "${android_container_name}" getprop sys.boot_completed
+    ;;
+  onboard)
+    "${runtime}" logs --tail 80 "${container_name}"
     ;;
   shell)
-    compose_command exec importer adb connect "${adb_endpoint}" >/dev/null || true
-    compose_command exec importer adb -s "${adb_endpoint}" shell
+    "${runtime}" exec --interactive --tty "${android_container_name}" /system/bin/sh
     ;;
-  install)
-    install_apk "${2:-}"
-    ;;
-  provision)
-    provision "${2:-}"
+  reconcile)
+    "${runtime}" exec "${container_name}" /usr/local/bin/fairth-provision-android
     ;;
   reboot)
-    adb_command reboot || true
-    wait_for_boot
+    "${runtime}" exec "${container_name}" adb connect android:5555 >/dev/null || true
+    "${runtime}" exec "${container_name}" adb -s android:5555 reboot
     ;;
   logs)
-    if [[ -n "${2:-}" ]]; then compose_command logs --follow "$2"; else compose_command logs --follow; fi
+    "${runtime}" logs --follow "${container_name}"
+    ;;
+  android-logs)
+    "${runtime}" logs --follow "${android_container_name}"
     ;;
   help|-h|--help|'')
     usage

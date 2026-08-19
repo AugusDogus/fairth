@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
-  "workspaces": ["companion", "services/*"],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "build": "bun --filter '@fairth/*' build",
     "check": "bun run test && bun run typecheck && bun run build",
-    "test": "bun test services/*/src",
+    "test": "bun test apps/*/src packages/*/src",
     "typecheck": "bun --filter '*' typecheck"
   },
   "devDependencies": {

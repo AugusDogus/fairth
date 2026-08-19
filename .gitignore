@@ -4,9 +4,9 @@ dist/
 coverage/
 .expo/
 .next/
-companion/android/
-companion/modules/*/android/build/
-companion/.env
+apps/companion/android/
+apps/companion/modules/*/android/build/
+apps/companion/.env
 artifacts/apks/
 artifacts/modules/
 *.sqlite

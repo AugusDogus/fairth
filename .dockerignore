@@ -2,7 +2,12 @@
 .git
 android-data
 node_modules
-companion/node_modules
-companion/android
+**/node_modules
+apps/companion/.expo
+apps/companion/android
+apps/companion/modules/*/android/build
 **/dist
+**/.next
+artifacts/apks
+artifacts/modules
 *.sqlite*
