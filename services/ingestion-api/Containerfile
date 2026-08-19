@@ -1,14 +1,16 @@
-FROM docker.io/library/node:24-bookworm-slim AS build
+FROM docker.io/oven/bun:1.3.10-debian AS build
 WORKDIR /app
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json bun.lock tsconfig.base.json ./
+COPY companion/package.json ./companion/
+COPY services/importer/package.json ./services/importer/
 COPY services/ingestion-api/package.json services/ingestion-api/tsconfig.json ./services/ingestion-api/
-RUN npm ci
+RUN bun install --frozen-lockfile --filter @fairth/ingestion-api
 COPY services/ingestion-api/src ./services/ingestion-api/src
-RUN npm run build --workspace @fairth/ingestion-api
+RUN bun --filter @fairth/ingestion-api build
 
-FROM docker.io/library/node:24-bookworm-slim
+FROM docker.io/oven/bun:1.3.10-debian
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/services/ingestion-api/dist ./dist
-USER node
-CMD ["node", "dist/main.js"]
+USER bun
+CMD ["bun", "dist/main.js"]

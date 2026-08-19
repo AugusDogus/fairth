@@ -136,7 +136,7 @@ The app is in [`companion`](companion). Install and build it on a machine with t
 
 ```bash
 cd companion
-npm install
+bun install
 npx expo run:android
 ```
 
@@ -182,14 +182,8 @@ Plan for 4 to 8 GB of RAM, 2 to 4 CPU cores, and enough host storage for Android
 Run repository checks without Android:
 
 ```bash
-npm install
-npm test
-npm run typecheck
-npm run build
-
-cd companion
-npm install
-npm run typecheck
+bun install
+bun run check
 ```
 
 For an end-to-end appliance check, upload a small unique image, watch the importer log for an `imported` event, confirm the file appears in `DCIM/Incoming`, then verify its backup state in Google Photos. Import success means the MediaStore row exists. Cloud backup remains controlled and reported by Google Photos.

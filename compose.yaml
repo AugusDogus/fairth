@@ -73,7 +73,7 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-53687091200}
       UPLOAD_CHUNK_BYTES: ${UPLOAD_CHUNK_BYTES:-8388608}
     healthcheck:
-      test: ["CMD", "node", "dist/healthcheck.js"]
+      test: ["CMD", "bun", "dist/healthcheck.js"]
       interval: 15s
       timeout: 5s
       retries: 4
@@ -104,7 +104,7 @@ services:
       STABLE_FOR_MS: ${IMPORTER_STABLE_FOR_MS:-15000}
       MAX_RETRIES: ${IMPORTER_MAX_RETRIES:-8}
     healthcheck:
-      test: ["CMD", "node", "dist/healthcheck.js"]
+      test: ["CMD", "bun", "dist/healthcheck.js"]
       interval: 30s
       timeout: 10s
       retries: 4

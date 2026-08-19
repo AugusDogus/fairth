@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
 
 export type ImportRecord = Readonly<{
@@ -31,7 +31,7 @@ function parseRecord(value: unknown): ImportRecord | undefined {
 }
 
 export function createImportDatabase(dataDirectory: string) {
-  const database = new DatabaseSync(join(dataDirectory, "importer.sqlite"));
+  const database = new Database(join(dataDirectory, "importer.sqlite"), { create: true });
   database.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;

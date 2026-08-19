@@ -153,7 +153,7 @@ case "${command_name}" in
   status)
     compose_command ps
     printf '\nImporter readiness:\n'
-    compose_command exec -T importer node --input-type=module -e 'const response = await fetch("http://127.0.0.1:3001/ready"); console.log(await response.text()); process.exitCode = response.ok ? 0 : 1' || true
+    compose_command exec -T importer bun -e 'const response = await fetch("http://127.0.0.1:3001/ready"); console.log(await response.text()); process.exitCode = response.ok ? 0 : 1' || true
     printf '\nAndroid packages and root stack:\n'
     adb_command shell sh -c 'printf "boot="; getprop sys.boot_completed; printf "abi="; getprop ro.product.cpu.abi; printf "native_bridge="; getprop ro.dalvik.vm.native.bridge; for package in com.google.android.apps.photos com.kinginu.pixelmask org.lsposed.manager; do pm path "$package" >/dev/null 2>&1 && echo "$package=installed" || echo "$package=missing"; done; su -c "magisk -v" 2>/dev/null || echo "magisk=missing"' || true
     ;;
