@@ -18,6 +18,11 @@ wait_for_android() {
   done
 }
 
+root_shell() {
+  escaped_script="$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+  adb -s "${adb_endpoint}" shell "su 0 sh -c '${escaped_script}'"
+}
+
 artifact_hash() {
   find "${artifacts_directory}" -type f \( -name '*.apk' -o -name '*.zip' \) -print0 2>/dev/null \
     | sort -z \
@@ -40,16 +45,16 @@ configure_pixelmask() {
       ;;
   esac
 
-  if ! adb -s "${adb_endpoint}" shell su -c "test -f ${lsposed_database}" >/dev/null 2>&1; then
+  if ! root_shell "test -f ${lsposed_database}" >/dev/null 2>&1; then
     printf '%s\n' 'PixelMask is installed, but the LSPosed configuration database is unavailable.' >&2
     return 1
   fi
-  if ! adb -s "${adb_endpoint}" shell su -c 'command -v sqlite3' >/dev/null 2>&1; then
+  if ! root_shell 'command -v sqlite3' >/dev/null 2>&1; then
     printf '%s\n' 'This Android image does not provide sqlite3, so LSPosed cannot be configured safely.' >&2
     return 1
   fi
 
-  current_scope="$(adb -s "${adb_endpoint}" shell su -c "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
+  current_scope="$(root_shell "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
   if test "${current_scope}" = '1:2'; then
     printf '%s\n' 'PixelMask is enabled for Google Photos in LSPosed.'
     return
@@ -57,7 +62,7 @@ configure_pixelmask() {
 
   printf '%s\n' 'Enabling PixelMask for Google Photos in LSPosed.'
   sql="BEGIN IMMEDIATE; INSERT OR IGNORE INTO modules (module_pkg_name,apk_path,enabled) VALUES ('${pixelmask_package}','${pixelmask_path}',1); UPDATE modules SET apk_path='${pixelmask_path}',enabled=1 WHERE module_pkg_name='${pixelmask_package}'; DELETE FROM scope WHERE mid=(SELECT mid FROM modules WHERE module_pkg_name='${pixelmask_package}'); INSERT INTO scope (mid,app_pkg_name,user_id) SELECT mid,'${photos_package}',0 FROM modules WHERE module_pkg_name='${pixelmask_package}'; INSERT INTO scope (mid,app_pkg_name,user_id) SELECT mid,'${pixelmask_package}',0 FROM modules WHERE module_pkg_name='${pixelmask_package}'; COMMIT;"
-  if ! adb -s "${adb_endpoint}" shell su -c "sqlite3 -bail ${lsposed_database} \"${sql}\""; then
+  if ! root_shell "sqlite3 -bail ${lsposed_database} \"${sql}\""; then
     printf '%s\n' 'LSPosed rejected the PixelMask transaction. Existing configuration was preserved.' >&2
     return 1
   fi
@@ -65,7 +70,7 @@ configure_pixelmask() {
   adb -s "${adb_endpoint}" shell am force-stop "${photos_package}" >/dev/null 2>&1 || true
   adb -s "${adb_endpoint}" reboot >/dev/null 2>&1 || true
   wait_for_android
-  verified_scope="$(adb -s "${adb_endpoint}" shell su -c "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
+  verified_scope="$(root_shell "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
   test "${verified_scope}" = '1:2'
 }
 
@@ -88,8 +93,8 @@ provision_artifacts() {
 
     module_count="$(find "${artifacts_directory}"/modules -maxdepth 1 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
     if test "${module_count}" -gt 0; then
-      adb -s "${adb_endpoint}" shell su -c 'magisk -v' >/dev/null 2>&1
-      adb -s "${adb_endpoint}" shell su -c 'magisk --sqlite "INSERT OR REPLACE INTO settings (key,value) VALUES (\"zygisk\",1);"'
+      root_shell '/sbin/magisk -v' >/dev/null 2>&1
+      root_shell '/sbin/magisk --sqlite "INSERT OR REPLACE INTO settings (key,value) VALUES (\"zygisk\",1);"'
       module_index=0
       for module in "${artifacts_directory}"/modules/*.zip; do
         test -f "${module}" || continue
@@ -97,7 +102,7 @@ provision_artifacts() {
         remote_module="/data/local/tmp/fairth-module-${module_index}.zip"
         printf 'Installing Magisk module: %s\n' "$(basename "${module}")"
         adb -s "${adb_endpoint}" push "${module}" "${remote_module}" >/dev/null
-        adb -s "${adb_endpoint}" shell su -c "magisk --install-module ${remote_module}"
+        root_shell "/sbin/magisk --install-module ${remote_module}"
         adb -s "${adb_endpoint}" shell rm -f "${remote_module}" || true
       done
     fi

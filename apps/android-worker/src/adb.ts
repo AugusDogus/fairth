@@ -14,6 +14,10 @@ export function pixelMaskPreferencesReady(preferences: string): boolean {
   return !moduleDisabled && originalPixelSelected;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 async function run(command: string, args: readonly string[], timeoutMs = 30_000): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -59,6 +63,10 @@ export function createAdb(config: Config) {
     return result.ok && result.stdout.startsWith("package:");
   }
 
+  async function rootShell(script: string): Promise<CommandResult> {
+    return command(["shell", `su 0 sh -c ${shellQuote(script)}`]);
+  }
+
   async function onboarding(): Promise<AndroidOnboarding> {
     const state = await command(["get-state"]);
     const connected = state.ok && state.stdout === "device";
@@ -78,18 +86,18 @@ export function createAdb(config: Config) {
       packageInstalled(config.googlePhotosPackage),
       packageInstalled("com.kinginu.pixelmask"),
     ]);
-    const magisk = await command(["shell", "su", "-c", "magisk -v"]);
+    const magisk = await rootShell("/sbin/magisk -v");
     const zygisk = magisk.ok
-      ? await command(["shell", "su", "-c", "magisk --sqlite 'SELECT value FROM settings WHERE key=\"zygisk\";'"])
+      ? await rootShell("/sbin/magisk --sqlite 'SELECT value FROM settings WHERE key=\"zygisk\";'")
       : undefined;
     const lsposedDatabase = magisk.ok
-      ? await command(["shell", "su", "-c", "test -f /data/adb/lspd/config/modules_config.db"])
+      ? await rootShell("test -f /data/adb/lspd/config/modules_config.db")
       : undefined;
     const pixelMaskScope = lsposedDatabase?.ok === true
-      ? await command(["shell", "su", "-c", "sqlite3 /data/adb/lspd/config/modules_config.db \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('com.kinginu.pixelmask','com.google.android.apps.photos') WHERE m.module_pkg_name='com.kinginu.pixelmask' GROUP BY m.mid;\""])
+      ? await rootShell("sqlite3 /data/adb/lspd/config/modules_config.db \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('com.kinginu.pixelmask','com.google.android.apps.photos') WHERE m.module_pkg_name='com.kinginu.pixelmask' GROUP BY m.mid;\"")
       : undefined;
     const pixelMaskPreferences = pixelMaskInstalled
-      ? await command(["shell", "su", "-c", "test ! -f /data/user/0/com.kinginu.pixelmask/shared_prefs/prefs.xml || cat /data/user/0/com.kinginu.pixelmask/shared_prefs/prefs.xml"])
+      ? await rootShell("test ! -f /data/user/0/com.kinginu.pixelmask/shared_prefs/prefs.xml || cat /data/user/0/com.kinginu.pixelmask/shared_prefs/prefs.xml")
       : undefined;
     const accounts = await command(["shell", "dumpsys", "account"]);
 
