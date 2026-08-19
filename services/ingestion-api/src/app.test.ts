@@ -34,6 +34,10 @@ describe("ingestion app", () => {
 
       const denied = await app.request("/v1/uploads", { method: "POST" });
       expect(denied.status).toBe(401);
+      expect(await denied.json()).toEqual({ error: "unauthorized", message: "Supply the configured ingestion token as a Bearer token." });
+
+      const invalid = await app.request("/v1/uploads", { headers: { authorization: "Bearer definitely-wrong" } });
+      expect(invalid.status).toBe(401);
     } finally {
       await rm(incomingRoot, { recursive: true, force: true });
     }

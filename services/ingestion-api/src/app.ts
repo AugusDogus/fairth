@@ -1,18 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import { Hono } from "hono";
+import { bearerAuth } from "hono/bearer-auth";
+import { HTTPException } from "hono/http-exception";
 import type { Config } from "./config.js";
 import { parseSessionRequest, safeFilename, type UploadMetadata } from "./domain.js";
 import { StorageError, type UploadStorage } from "./storage.js";
 
 const jsonBodyLimit = 64 * 1024;
-
-function authorized(header: string | undefined, token: string): boolean {
-  if (header === undefined || !header.startsWith("Bearer ")) return false;
-  const actual = Buffer.from(header.slice(7));
-  const expected = Buffer.from(token);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
 
 async function readJson(request: Request): Promise<unknown> {
   const declaredLength = request.headers.get("content-length");
@@ -98,12 +92,13 @@ export function createApp(config: Config, storage: UploadStorage) {
 
   app.get("/health", (context) => context.json({ status: "ok", service: "ingestion-api" }));
 
-  app.use("*", async (context, next) => {
-    if (!authorized(context.req.header("authorization"), config.token)) {
-      return context.json({ error: "unauthorized", message: "Supply the configured ingestion token as a Bearer token." }, 401);
-    }
-    await next();
-  });
+  const unauthorized = { error: "unauthorized", message: "Supply the configured ingestion token as a Bearer token." };
+  app.use("*", bearerAuth({
+    token: config.token,
+    noAuthenticationHeader: { message: unauthorized },
+    invalidAuthenticationHeader: { message: unauthorized },
+    invalidToken: { message: unauthorized },
+  }));
 
   app.post("/upload", async (context) => {
     const filename = optionalHeader(context.req.raw, "x-file-name", 255);
@@ -146,6 +141,7 @@ export function createApp(config: Config, storage: UploadStorage) {
   app.notFound((context) => context.json({ error: "not_found", message: "No ingestion route matches this request." }, 404));
 
   app.onError((error, context) => {
+    if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof StorageError) {
       switch (error.code) {
         case "not_found": return context.json({ error: error.code, message: error.message }, 404);
