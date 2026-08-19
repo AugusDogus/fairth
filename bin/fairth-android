@@ -15,7 +15,7 @@ usage() {
     '  build-image           Build the pinned GApps + Magisk + native-bridge image' \
     '  check                 Validate Docker, storage, and Redroid host support' \
     '  up                    Build and start the complete appliance' \
-    '  onboard               Print the browser setup link and recent setup status' \
+    '  onboard               Print Android and owner setup links' \
     '  down                  Stop services while preserving data' \
     '  status                Show Compose and application readiness' \
     '  shell                 Open an Android shell through the private ADB sidecar' \
@@ -86,6 +86,20 @@ wait_for_setup() {
   return 1
 }
 
+wait_for_ingestion() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if compose_command exec -T ingestion-api bun -e 'const response = await fetch("http://127.0.0.1:3000/health"); process.exit(response.ok ? 0 : 1)' >/dev/null 2>&1; then
+      printf '%s\n' 'Ingestion and owner setup are ready.'
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' 'Ingestion did not become ready within 60 seconds. Recent ingestion logs follow.' >&2
+  compose_command logs --no-color --tail 40 ingestion-api >&2 || true
+  return 1
+}
+
 install_apk() {
   local apk_path="$1"
   local container_id
@@ -142,10 +156,13 @@ case "${command_name}" in
     compose_command up --detach --build
     wait_for_boot
     wait_for_setup
+    wait_for_ingestion
     compose_command logs --no-color --tail 20 setup-ui
+    compose_command logs --no-color --tail 20 ingestion-api
     ;;
   onboard)
     compose_command logs --no-color --tail 40 setup-ui
+    compose_command logs --no-color --tail 40 ingestion-api
     ;;
   down)
     compose_command down

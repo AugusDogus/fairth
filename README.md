@@ -18,14 +18,14 @@ Redroid / DCIM/Incoming / Google Photos
 ## What is included
 
 - Redroid with persistent `/data` and host-only ADB exposure
-- Bearer-authenticated direct upload endpoint
+- Better Auth owner account with device-code enrollment and revocable Bearer sessions
 - Chunked, resumable upload sessions for large videos
 - Atomic publication, so the importer never sees a partial API upload
 - Stabilization checks for files copied directly into an Unraid share
 - SQLite import history, SHA-256 deduplication, bounded exponential retries, and an archive
 - MediaStore verification after every ADB import
 - Health details for Android boot, ADB, Google Photos, queue state, and importer state
-- Expo SDK 57 app with MediaLibrary discovery, album filters, manual selection, SQLite queueing, LAN-first routing, secure token storage, and background scheduling
+- Expo SDK 57 app with MediaLibrary selection and a local Kotlin module for native scanning, queueing, LAN-first uploads, and WorkManager scheduling
 - Browser-based Android onboarding over TLS
 - Automatic APK, Magisk module, LSPosed, and PixelMask artifact provisioning
 
@@ -48,19 +48,19 @@ Create persistent directories outside `docker.img`:
 ```bash
 mkdir -p /mnt/user/appdata/fairth/android-data
 mkdir -p /mnt/user/appdata/fairth/importer
+mkdir -p /mnt/user/appdata/fairth/ingestion
 mkdir -p /mnt/user/appdata/fairth/setup
 mkdir -p /mnt/user/photos-incoming/{drop,ready,archive}
-chown -R 99:100 /mnt/user/appdata/fairth/importer /mnt/user/photos-incoming
+chown -R 99:100 /mnt/user/appdata/fairth/importer /mnt/user/appdata/fairth/ingestion /mnt/user/photos-incoming
 ```
 
-Copy the environment template and generate an ingestion token:
+Copy the environment template:
 
 ```bash
 cp .env.example .env
-openssl rand -hex 32
 ```
 
-Put the generated value in `INGESTION_TOKEN`. Generate the eight-character `SETUP_PASSWORD` as shown in `.env.example`. Set `REDROID_IMAGE` to a GApps + Magisk + native-bridge image when using PixelMask on x86-64.
+Set `PUBLIC_BASE_URL` to the exact origin phones and browsers use for Fairth. Generate the eight-character `SETUP_PASSWORD` as shown in `.env.example`. Fairth generates and persists the Better Auth secret unless `BETTER_AUTH_SECRET` is explicitly configured. Set `REDROID_IMAGE` to a GApps + Magisk + native-bridge image when using PixelMask on x86-64.
 
 Build the default local Android image once. This downloads the official Redroid base and pinned third-party GApps, Magisk, and native-bridge inputs:
 
@@ -75,7 +75,7 @@ bin/fairth-android check
 bin/fairth-android up
 ```
 
-`up` waits for Android and prints an HTTPS onboarding link. Open it, accept the appliance's private certificate, and enter `SETUP_PASSWORD`. The page is a live view of the Android phone. Complete Google's sign-in in that view, then enable backup in Google Photos. Run `bin/fairth-android onboard` to print the link again.
+`up` waits for Android and prints two links. The Android onboarding link opens a live view of the emulated phone. Accept the appliance's private certificate, enter `SETUP_PASSWORD`, complete Google's sign-in in Android, then enable backup in Google Photos. The one-time Fairth owner link creates the account that approves companion phones. Run `bin/fairth-android onboard` to print both links again.
 
 Google does not provide a supported way for a separate web OAuth callback to inject an account into Android's system account store. The browser view keeps credential entry in Google's Android UI. Fairth never receives or stores the Google password. The persistent Android `/data` mount preserves the resulting account across container restarts.
 
@@ -105,23 +105,23 @@ Google login, Photos settings, Magisk modules, LSPosed state, and PixelMask stat
 
 ## Ingestion API
 
-All upload routes require `Authorization: Bearer <INGESTION_TOKEN>`. `/health` is unauthenticated so local routing and container health checks can probe it.
+All upload routes require a Better Auth device session as `Authorization: Bearer <session-token>`. `/health` is unauthenticated so local routing and container health checks can probe it.
 
 ### Network and authentication model
 
 Do not port-forward the ingestion API. For remote phones, the recommended v1 deployment is Tailscale on the phone and Unraid, with `INGESTION_BIND_ADDRESS` set to the Unraid Tailscale address. Use that device's MagicDNS name or tailnet IP as the companion's remote endpoint. Ordinary tailnet traffic does not require selecting an exit node. An exit node is only for routing the phone's general Internet traffic through another device.
 
-Tailscale Serve is also suitable when an HTTPS name is preferred. Inspect `tailscale serve status` before changing it, because a new root handler can replace an existing service mapping. Keep the bearer token enabled as defense in depth even when tailnet access controls restrict which devices can reach the port.
+Tailscale Serve is also suitable when an HTTPS name is preferred. Inspect `tailscale serve status` before changing it, because a new root handler can replace an existing service mapping. Keep Better Auth enabled as defense in depth even when tailnet access controls restrict which devices can reach the port.
 
-The v1 token is an appliance credential shared by enrolled companion devices. Hono's bearer middleware performs the token validation, and the companion stores the value in Android Keystore. It does not yet provide per-device expiry or revocation. Better Auth is intentionally deferred until Fairth has an owner sign-in and device-approval screen. At that point its device-authorization and bearer plugins can replace the shared token with revocable device sessions. Adding Better Auth before that lifecycle exists would add user, session, migration, recovery, and secret-management state without providing a usable enrollment flow.
+The companion requests an eight-character device code, opens Fairth's authenticated approval page, and polls until the owner approves it. Better Auth then issues a one-year revocable session. The owner can inspect and revoke companion sessions at `/owner/devices`; revocation takes effect on the next API request. Auth data, migrations, the generated secret, and sessions persist under `INGESTION_DATA_PATH`.
 
-References: [Tailscale exit nodes](https://tailscale.com/kb/1103/exit-nodes/), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [Hono bearer authentication](https://hono.dev/docs/middleware/builtin/bearer-auth), [Better Auth device authorization](https://better-auth.com/docs/plugins/device-authorization).
+References: [Tailscale exit nodes](https://tailscale.com/kb/1103/exit-nodes/), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), and [Better Auth device authorization](https://better-auth.com/docs/plugins/device-authorization).
 
 For a simple complete-file upload:
 
 ```bash
 curl --fail \
-  -H "Authorization: Bearer ${INGESTION_TOKEN}" \
+  -H "Authorization: Bearer ${FAIRTH_DEVICE_TOKEN}" \
   -H 'X-File-Name: IMG_0001.jpg' \
   -H 'X-Device-Id: pixel-8-pro' \
   -H 'X-Album: Camera' \
@@ -154,15 +154,17 @@ In the app:
 
 1. Set the LAN endpoint, usually `http://unraid.local:3000`.
 2. Optionally set an HTTPS remote fallback.
-3. Paste the ingestion token. It is stored in Android Keystore through Expo SecureStore.
+3. Tap **Enroll this device**, sign in as the Fairth owner, and approve the displayed code.
 4. Select albums, or leave all albums unselected to watch the full camera roll.
 5. Enable automatic sync and the desired Wi-Fi, charging, and time-window rules.
 
-The LAN endpoint is probed first on every drain. If it is unavailable, the app tries the remote endpoint. Queue and resumable-session state persist in SQLite. Media change listeners trigger foreground sync. Android schedules background work opportunistically, with a minimum interval of about 15 minutes. The operating system decides the actual execution time, so Expo background tasks cannot guarantee immediate uploads while the app is suspended.
+The companion requires a development or release Android build. It does not run in Expo Go because its uploader is a local native module. The LAN endpoint is probed first on every run. If unavailable, the worker tries the remote endpoint.
+
+Android WorkManager performs MediaStore discovery, persistent SQLite queueing, and resumable HTTP transfer without launching the Expo JavaScript runtime. Work is restored after app-process death and phone reboot, honors Wi-Fi and charging constraints, and runs at Android's minimum periodic interval of 15 minutes. Active large transfers use a `dataSync` foreground notification and stop after a bounded run; remaining chunks continue in later work. Android still controls exact timing. Explicitly force-stopping the app disables all of its scheduled work until the user launches it again, which no Android app can bypass.
 
 The managed Expo app targets the recommended ingestion API. Raw SMB is not available from Expo Go without a native SMB module. If an Unraid share is the desired staging target, expose it through this API or a separately secured WebDAV/HTTP gateway.
 
-Cleartext HTTP is enabled for local Android builds so `.local` LAN endpoints work. Never send the bearer token over cleartext Internet links. Use HTTPS, WireGuard, Tailscale, or another trusted private tunnel for remote access.
+Cleartext HTTP is enabled for local Android builds so `.local` LAN endpoints work. Never send owner credentials or a device session over cleartext Internet links. Use HTTPS, WireGuard, Tailscale, or another trusted private tunnel for remote access.
 
 ## Status and operations
 
@@ -197,3 +199,13 @@ bun run check
 ```
 
 For an end-to-end appliance check, upload a small unique image, watch the importer log for an `imported` event, confirm the file appears in `DCIM/Incoming`, then verify its backup state in Google Photos. Import success means the MediaStore row exists. Cloud backup remains controlled and reported by Google Photos.
+
+The companion's Kotlin module can be compiled without a phone after Expo prebuild:
+
+```bash
+cd companion
+npx expo prebuild --platform android --no-install
+./android/gradlew :fairth-background-upload:compileDebugKotlin
+```
+
+[Argent](https://github.com/software-mansion/argent) can drive an Android emulator or an ADB-connected physical phone for repeatable UI and process-restart smoke tests.
