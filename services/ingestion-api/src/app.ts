@@ -1,11 +1,11 @@
 import { Readable } from "node:stream";
 import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type { AuthService } from "./auth.js";
-import type { Config } from "./config.js";
-import { parseSessionRequest, safeFilename, type UploadMetadata } from "./domain.js";
-import { createOwnerApp } from "./owner.js";
-import { StorageError, type UploadStorage } from "./storage.js";
+import type { AuthService } from "./auth";
+import type { Config } from "./config";
+import { parseSessionRequest, safeFilename, type UploadMetadata } from "./domain";
+import { createOwnerApp } from "./owner";
+import { StorageError, type UploadStorage } from "./storage";
 
 const jsonBodyLimit = 64 * 1024;
 
@@ -63,9 +63,22 @@ function metadataFromHeaders(request: Request): UploadMetadata {
   };
 }
 
+async function* bodyChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) return;
+      yield result.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function uploadBody(request: Request): Readable {
   if (request.body === null) throw new StorageError("invalid", "Upload request body is required.");
-  return Readable.fromWeb(request.body);
+  return Readable.from(bodyChunks(request.body));
 }
 
 function uploadId(value: string): string {

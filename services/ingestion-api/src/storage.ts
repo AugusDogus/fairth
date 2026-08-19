@@ -4,8 +4,8 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import type { Config } from "./config.js";
-import { parseSessionRequest, safeFilename, type UploadMetadata, type UploadSession } from "./domain.js";
+import type { Config } from "./config";
+import { parseSessionRequest, safeFilename, type UploadMetadata, type UploadSession } from "./domain";
 
 export type UploadStorage = ReturnType<typeof createUploadStorage>;
 

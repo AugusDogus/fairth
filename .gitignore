@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 .expo/
+.next/
 companion/android/
 companion/modules/*/android/build/
 companion/.env

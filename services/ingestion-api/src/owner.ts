@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import type { AuthService } from "./auth.js";
-import type { Config } from "./config.js";
+import type { AuthService } from "./auth";
+import type { Config } from "./config";
 
 function escapeHtml(value: string): string {
   return value

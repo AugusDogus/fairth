@@ -5,3 +5,5 @@ try {
 } catch {
   process.exitCode = 1;
 }
+
+export {};

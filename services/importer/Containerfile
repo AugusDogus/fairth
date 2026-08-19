@@ -1,4 +1,4 @@
-FROM docker.io/oven/bun:1.3.10-debian AS build
+FROM docker.io/oven/bun:1.3.14-debian AS build
 WORKDIR /app
 COPY package.json bun.lock tsconfig.base.json ./
 COPY companion/package.json ./companion/
@@ -8,7 +8,7 @@ RUN bun install --frozen-lockfile --filter @fairth/importer
 COPY services/importer/src ./services/importer/src
 RUN bun --filter @fairth/importer build
 
-FROM docker.io/oven/bun:1.3.10-debian
+FROM docker.io/oven/bun:1.3.14-debian
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends adb ca-certificates \
     && rm -rf /var/lib/apt/lists/*

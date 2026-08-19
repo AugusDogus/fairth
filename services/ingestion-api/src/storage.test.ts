@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { createUploadStorage } from "./storage.js";
+import { createUploadStorage } from "./storage";
 
 describe("upload storage", () => {
   test("resumes chunks and atomically publishes their assembled content", async () => {

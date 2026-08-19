@@ -1,7 +1,7 @@
-import { loadConfig } from "./config.js";
-import { createApp } from "./app.js";
-import { createAuthService } from "./auth.js";
-import { createUploadStorage } from "./storage.js";
+import { loadConfig } from "./config";
+import { createApp } from "./app";
+import { createAuthService } from "./auth";
+import { createUploadStorage } from "./storage";
 
 const config = loadConfig();
 const storage = createUploadStorage(config);

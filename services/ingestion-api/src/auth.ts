@@ -6,7 +6,7 @@ import { betterAuth } from "better-auth";
 import { isAPIError } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { bearer, deviceAuthorization } from "better-auth/plugins";
-import type { Config } from "./config.js";
+import type { Config } from "./config";
 
 const secretFilename = "better-auth.secret";
 const ownerSetupFilename = "owner-setup.token";

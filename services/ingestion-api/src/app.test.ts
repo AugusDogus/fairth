@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp } from "./app.js";
-import { createAuthService } from "./auth.js";
-import type { Config } from "./config.js";
-import { createUploadStorage } from "./storage.js";
+import { createApp } from "./app";
+import { createAuthService } from "./auth";
+import type { Config } from "./config";
+import { createUploadStorage } from "./storage";
 
 async function fixture() {
   const incomingRoot = await mkdtemp(join(tmpdir(), "fairth-app-"));

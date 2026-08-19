@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseSessionRequest, safeFilename } from "./domain.js";
+import { parseSessionRequest, safeFilename } from "./domain";
 
 describe("safeFilename", () => {
   test("removes traversal and shell characters", () => {
