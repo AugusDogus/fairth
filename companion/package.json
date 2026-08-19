@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@react-native-community/netinfo": "12.0.1",
+    "better-auth": "^1.7.1",
     "expo": "~57.0.14",
     "expo-background-task": "~57.0.11",
     "expo-battery": "~57.0.2",

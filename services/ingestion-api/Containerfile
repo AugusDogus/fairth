@@ -12,5 +12,6 @@ FROM docker.io/oven/bun:1.3.10-debian
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/services/ingestion-api/dist ./dist
+RUN mkdir -p /data /incoming && chown -R bun:bun /data /incoming
 USER bun
 CMD ["bun", "dist/main.js"]

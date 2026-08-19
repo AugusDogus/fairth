@@ -1,9 +1,10 @@
 import { Readable } from "node:stream";
-import { Hono } from "hono";
-import { bearerAuth } from "hono/bearer-auth";
+import { Hono, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import type { AuthService } from "./auth.js";
 import type { Config } from "./config.js";
 import { parseSessionRequest, safeFilename, type UploadMetadata } from "./domain.js";
+import { createOwnerApp } from "./owner.js";
 import { StorageError, type UploadStorage } from "./storage.js";
 
 const jsonBodyLimit = 64 * 1024;
@@ -81,7 +82,7 @@ function chunkIndex(value: string): number {
   return index;
 }
 
-export function createApp(config: Config, storage: UploadStorage) {
+export function createApp(config: Config, storage: UploadStorage, authService: AuthService) {
   const app = new Hono();
 
   app.use("*", async (context, next) => {
@@ -91,14 +92,23 @@ export function createApp(config: Config, storage: UploadStorage) {
   });
 
   app.get("/health", (context) => context.json({ status: "ok", service: "ingestion-api" }));
+  app.route("/", createOwnerApp(config, authService));
 
-  const unauthorized = { error: "unauthorized", message: "Supply the configured ingestion token as a Bearer token." };
-  app.use("*", bearerAuth({
-    token: config.token,
-    noAuthenticationHeader: { message: unauthorized },
-    invalidAuthenticationHeader: { message: unauthorized },
-    invalidToken: { message: unauthorized },
-  }));
+  app.on(["GET", "POST"], "/api/auth/*", (context) => {
+    if (context.req.path === "/api/auth/sign-up/email") {
+      return context.json({ error: "not_found", message: "Owner registration is only available through the one-time setup link." }, 404);
+    }
+    return authService.auth.handler(context.req.raw);
+  });
+
+  const unauthorized = { error: "unauthorized", message: "Supply a valid enrolled-device Bearer session." };
+  const requireSession: MiddlewareHandler = async (context, next) => {
+    const session = await authService.auth.api.getSession({ headers: context.req.raw.headers });
+    if (session === null) return context.json(unauthorized, 401);
+    await next();
+  };
+  app.use("/upload", requireSession);
+  app.use("/v1/uploads/*", requireSession);
 
   app.post("/upload", async (context) => {
     const filename = optionalHeader(context.req.raw, "x-file-name", 255);

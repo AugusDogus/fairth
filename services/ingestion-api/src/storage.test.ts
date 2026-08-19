@@ -10,7 +10,7 @@ describe("upload storage", () => {
     const root = await mkdtemp(join(tmpdir(), "fairth-upload-"));
     try {
       const storage = createUploadStorage({
-        host: "127.0.0.1", port: 1, incomingRoot: root, token: "0123456789abcdef01234567",
+        host: "127.0.0.1", port: 1, incomingRoot: root, authDataRoot: root, publicBaseUrl: "http://127.0.0.1:3000",
         maxUploadBytes: 100, chunkBytes: 4,
       });
       await storage.initialize();

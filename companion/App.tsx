@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -13,6 +14,7 @@ import {
 import * as MediaLibrary from "expo-media-library/legacy";
 import { getToken, saveToken } from "./src/credentials";
 import { initializeDatabase, loadSettings, queueCounts, saveSettings } from "./src/database";
+import { beginEnrollment, completeEnrollment } from "./src/enrollment";
 import { enqueueChoices, listAlbums, recentMedia, requestMediaAccess, type AlbumChoice, type MediaChoice } from "./src/media";
 import { configureBackgroundSync, syncCycle } from "./src/sync";
 import type { SyncSettings } from "./src/types";
@@ -52,7 +54,8 @@ function Toggle(props: Readonly<{ label: string; detail: string; value: boolean;
 
 export default function App() {
   const [settings, setSettings] = useState<SyncSettings>(defaultSettings);
-  const [token, setToken] = useState("");
+  const [enrolled, setEnrolled] = useState(false);
+  const [pairingCode, setPairingCode] = useState<string | undefined>();
   const [albums, setAlbums] = useState<AlbumChoice[]>([]);
   const [recent, setRecent] = useState<MediaChoice[]>([]);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -73,7 +76,7 @@ export default function App() {
         const [savedSettings, savedToken] = await Promise.all([loadSettings(), getToken()]);
         if (!mounted) return;
         setSettings(savedSettings);
-        setToken(savedToken ?? "");
+        setEnrolled(savedToken !== undefined);
         if (granted) {
           const [albumChoices, mediaChoices] = await Promise.all([listAlbums(), recentMedia()]);
           if (!mounted) return;
@@ -106,10 +109,35 @@ export default function App() {
   async function persist(): Promise<void> {
     setBusy(true);
     try {
-      await Promise.all([saveSettings(settings), saveToken(token.trim()), configureBackgroundSync(settings.automaticSync)]);
-      setMessage("Settings saved. The token is stored in the device secure store.");
+      await Promise.all([saveSettings(settings), configureBackgroundSync(settings.automaticSync)]);
+      setMessage("Settings saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Settings could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enrollDevice(): Promise<void> {
+    setBusy(true);
+    setMessage("Requesting a device enrollment code…");
+    try {
+      const enrollmentEndpoint = settings.lanEndpoint.trim().length > 0 ? settings.lanEndpoint : settings.primaryEndpoint;
+      const challenge = await beginEnrollment(enrollmentEndpoint);
+      setPairingCode(challenge.userCode);
+      setMessage(`Approve code ${challenge.userCode} in the owner page.`);
+      await Linking.openURL(challenge.verificationUriComplete);
+      const result = await completeEnrollment(challenge, settings.deviceId);
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+      await saveToken(result.token);
+      setEnrolled(true);
+      setPairingCode(undefined);
+      setMessage("This device is enrolled. Automatic uploads can now run without reopening Fairth.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Device enrollment failed.");
     } finally {
       setBusy(false);
     }
@@ -167,8 +195,10 @@ export default function App() {
         <Text style={styles.sectionTitle}>Connection</Text>
         <Field label="LAN endpoint" onChange={(lanEndpoint) => update({ lanEndpoint })} value={settings.lanEndpoint} />
         <Field label="Remote fallback endpoint" onChange={(primaryEndpoint) => update({ primaryEndpoint })} value={settings.primaryEndpoint} />
-        <Field label="Ingestion token" onChange={setToken} secret value={token} />
         <Field label="Device ID" onChange={(deviceId) => update({ deviceId })} value={settings.deviceId} />
+        <Text style={styles.detail}>{enrolled ? "Enrolled with a revocable device session." : "Not enrolled yet."}</Text>
+        {pairingCode === undefined ? null : <Text style={styles.pairingCode}>{pairingCode}</Text>}
+        <Pressable disabled={busy} onPress={() => void enrollDevice()} style={styles.secondary}><Text style={styles.secondaryText}>{enrolled ? "Replace device enrollment" : "Enroll this device"}</Text></Pressable>
 
         <Text style={styles.sectionTitle}>Sync rules</Text>
         <Toggle detail="Use cellular only when this is off." label="Wi-Fi only" onChange={(wifiOnly) => update({ wifiOnly })} value={settings.wifiOnly} />
@@ -243,4 +273,5 @@ const styles = StyleSheet.create({
   mediaCopy: { flex: 1, marginLeft: 10 },
   mediaName: { color: "#e2e8f0", fontSize: 14, fontWeight: "600" },
   check: { color: "#2dd4bf", fontSize: 20, fontWeight: "800", width: 28, textAlign: "center" },
+  pairingCode: { color: "#f8fafc", fontFamily: "monospace", fontSize: 28, fontWeight: "800", letterSpacing: 4, textAlign: "center" },
 });

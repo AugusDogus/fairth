@@ -2,6 +2,7 @@
   "expo": {
     "name": "Fairth Companion",
     "slug": "fairth-companion",
+    "scheme": "fairth",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",

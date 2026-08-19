@@ -4,7 +4,8 @@ export type Config = Readonly<{
   host: string;
   port: number;
   incomingRoot: string;
-  token: string;
+  authDataRoot: string;
+  publicBaseUrl: string;
   maxUploadBytes: number;
   chunkBytes: number;
 }>;
@@ -20,16 +21,19 @@ function positiveInteger(name: string, fallback: number): number {
 }
 
 export function loadConfig(): Config {
-  const token = process.env.INGESTION_TOKEN;
-  if (token === undefined || token.length < 24) {
-    throw new Error("INGESTION_TOKEN must contain at least 24 characters. Generate one with `openssl rand -hex 32`.");
+  const port = positiveInteger("PORT", 3000);
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
+  const parsedPublicUrl = new URL(publicBaseUrl);
+  if ((parsedPublicUrl.protocol !== "http:" && parsedPublicUrl.protocol !== "https:") || parsedPublicUrl.pathname !== "/") {
+    throw new Error(`PUBLIC_BASE_URL must be an HTTP(S) origin without a path; received ${publicBaseUrl}.`);
   }
 
   return {
     host: process.env.HOST ?? "0.0.0.0",
-    port: positiveInteger("PORT", 3000),
+    port,
     incomingRoot: resolve(process.env.INCOMING_ROOT ?? "/incoming"),
-    token,
+    authDataRoot: resolve(process.env.AUTH_DATA_ROOT ?? "/data"),
+    publicBaseUrl: parsedPublicUrl.origin,
     maxUploadBytes: positiveInteger("MAX_UPLOAD_BYTES", 50 * 1024 * 1024 * 1024),
     chunkBytes: positiveInteger("UPLOAD_CHUNK_BYTES", 8 * 1024 * 1024),
   };
