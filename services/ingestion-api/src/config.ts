@@ -31,8 +31,8 @@ export function loadConfig(): Config {
   return {
     host: process.env.HOST ?? "0.0.0.0",
     port,
-    incomingRoot: resolve(process.env.INCOMING_ROOT ?? "/incoming"),
-    authDataRoot: resolve(process.env.AUTH_DATA_ROOT ?? "/data"),
+    incomingRoot: resolve(/* turbopackIgnore: true */ process.env.INCOMING_ROOT ?? "/incoming"),
+    authDataRoot: resolve(/* turbopackIgnore: true */ process.env.AUTH_DATA_ROOT ?? "/data"),
     publicBaseUrl: parsedPublicUrl.origin,
     maxUploadBytes: positiveInteger("MAX_UPLOAD_BYTES", 50 * 1024 * 1024 * 1024),
     chunkBytes: positiveInteger("UPLOAD_CHUNK_BYTES", 8 * 1024 * 1024),
