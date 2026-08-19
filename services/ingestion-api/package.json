@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node node_modules/next/dist/bin/next build && bun build ./src/healthcheck.ts --target bun --outdir dist --sourcemap=external",
+    "build": "bun --bun next build --webpack && bun build ./src/healthcheck.ts --target bun --outdir dist --sourcemap=external",
     "dev": "next dev",
     "start": "bun --bun next start",
     "typecheck": "tsc -p tsconfig.json --noEmit"
