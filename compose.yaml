@@ -13,7 +13,15 @@ services:
       - 127.0.0.1:${ANDROID_GRPC_PORT:-8554}:8554
     restart: unless-stopped
     volumes:
-      - android-data:/data
+      - ${ANDROID_DATA_PATH:-/mnt/user/appdata/fairth/android-data}:/data
 
-volumes:
-  android-data:
+  adb:
+    build:
+      context: .
+      dockerfile: docker/adb/Containerfile
+    command: ["sleep", "infinity"]
+    depends_on:
+      - android
+    restart: unless-stopped
+    volumes:
+      - ${ANDROID_ADB_KEY_DIRECTORY:-/mnt/user/appdata/fairth/adb}:/root/.android

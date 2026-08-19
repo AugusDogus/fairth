@@ -3,10 +3,10 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-runtime="${CONTAINER_RUNTIME:-podman}"
-adb_key_path="${ANDROID_ADB_KEY_PATH:-${HOME}/.android/adbkey}"
-adb_port="${ANDROID_ADB_PORT:-5555}"
-adb_endpoint="127.0.0.1:${adb_port}"
+runtime="${CONTAINER_RUNTIME:-docker}"
+adb_key_directory="${ANDROID_ADB_KEY_DIRECTORY:-/mnt/user/appdata/fairth/adb}"
+adb_key_path="${ANDROID_ADB_KEY_PATH:-${adb_key_directory}/adbkey}"
+adb_endpoint="android:5555"
 compose=("${runtime}" compose --file "${project_dir}/compose.yaml")
 
 usage() {
@@ -20,8 +20,7 @@ usage() {
     '  status         Show container and Android boot status' \
     '  shell          Open an ADB shell' \
     '  install <apk>  Install or update an APK' \
-    '  logs           Follow container logs' \
-    '  reset --yes    Stop Android and permanently remove its data volume'
+    '  logs           Follow container logs'
 }
 
 require_command() {
@@ -35,8 +34,6 @@ require_command() {
 
 check() {
   require_command "${runtime}"
-  require_command adb
-
   if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
     printf '%s\n' '/dev/kvm must be readable and writable by the current user.' >&2
     return 1
@@ -60,7 +57,11 @@ with_adb_key() {
 }
 
 connect_adb() {
-  adb connect "${adb_endpoint}" >/dev/null
+  with_adb_key exec --no-TTY adb adb connect "${adb_endpoint}" >/dev/null
+}
+
+adb_command() {
+  with_adb_key exec --no-TTY adb adb -s "${adb_endpoint}" "$@"
 }
 
 wait_for_boot() {
@@ -69,7 +70,7 @@ wait_for_boot() {
 
   for attempt in $(seq 1 90); do
     connect_adb || true
-    boot_completed="$(adb -s "${adb_endpoint}" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    boot_completed="$(adb_command shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     if [[ "${boot_completed}" == "1" ]]; then
       printf 'Android is ready at %s.\n' "${adb_endpoint}"
       return 0
@@ -100,14 +101,14 @@ case "${command_name}" in
     check
     with_adb_key ps
     connect_adb || true
-    adb -s "${adb_endpoint}" shell getprop sys.boot_completed 2>/dev/null \
+    adb_command shell getprop sys.boot_completed 2>/dev/null \
       | tr -d '\r' \
       | sed 's/^/sys.boot_completed=/'
     ;;
   shell)
     check
     connect_adb
-    adb -s "${adb_endpoint}" shell
+    with_adb_key exec adb adb -s "${adb_endpoint}" shell
     ;;
   install)
     check
@@ -117,19 +118,14 @@ case "${command_name}" in
       exit 2
     fi
     connect_adb
-    adb -s "${adb_endpoint}" install -r "${apk_path}"
+    adb_container_id="$(with_adb_key ps --quiet adb)"
+    "${runtime}" cp "${apk_path}" "${adb_container_id}:/tmp/fairth-install.apk"
+    with_adb_key exec --no-TTY adb adb -s "${adb_endpoint}" install -r /tmp/fairth-install.apk
+    with_adb_key exec --no-TTY adb rm -f /tmp/fairth-install.apk
     ;;
   logs)
     check
     with_adb_key logs --follow
-    ;;
-  reset)
-    check
-    if [[ "${2:-}" != "--yes" ]]; then
-      printf '%s\n' 'reset permanently removes the emulator data volume. Re-run with --yes.' >&2
-      exit 2
-    fi
-    with_adb_key down --volumes
     ;;
   help|-h|--help|'')
     usage
