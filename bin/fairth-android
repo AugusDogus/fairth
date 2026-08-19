@@ -99,6 +99,8 @@ start_appliance() {
   local traefik_enable
   local fairth_hostname
   local traefik_network
+  local binder_root
+  local binder_device
   local existing_name
   local -a android_arguments
   local -a fairth_arguments
@@ -144,6 +146,25 @@ start_appliance() {
     "${runtime}" network create "${network_name}" >/dev/null
   fi
 
+  if [[ -c /dev/binder && -c /dev/hwbinder && -c /dev/vndbinder ]]; then
+    binder_root=/dev
+  elif grep -qw binder /proc/filesystems 2>/dev/null; then
+    binder_root=/dev/binderfs
+    mkdir -p "${binder_root}"
+    if ! grep -qs " ${binder_root} binder " /proc/mounts; then
+      mount -t binder binder "${binder_root}"
+    fi
+    for binder_device in binder hwbinder vndbinder; do
+      if [[ ! -c "${binder_root}/${binder_device}" ]]; then
+        printf 'Binderfs did not create %s/%s. Check the host binder configuration.\n' "${binder_root}" "${binder_device}" >&2
+        return 1
+      fi
+    done
+  else
+    printf '%s\n' 'Android Binder device nodes are unavailable on this host.' >&2
+    return 1
+  fi
+
   android_arguments=(
     run --detach
     --name "${android_container_name}"
@@ -151,6 +172,9 @@ start_appliance() {
     --restart unless-stopped
     --network "${network_name}"
     --network-alias android
+    --device "${binder_root}/binder:/dev/binder"
+    --device "${binder_root}/hwbinder:/dev/hwbinder"
+    --device "${binder_root}/vndbinder:/dev/vndbinder"
     --volume "${android_data_path}:/data"
     "${redroid_image}"
     androidboot.hardware=redroid
