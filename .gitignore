@@ -4,6 +4,7 @@ dist/
 coverage/
 .expo/
 companion/android/
+companion/modules/*/android/build/
 companion/.env
 artifacts/apks/
 artifacts/modules/

@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.fairth.backgroundupload'
+version = '0.1.0'
+
+android {
+  namespace "dev.fairth.backgroundupload"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation "androidx.work:work-runtime-ktx:2.11.1"
+}

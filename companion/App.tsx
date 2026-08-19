@@ -13,10 +13,10 @@ import {
 } from "react-native";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { getToken, saveToken } from "./src/credentials";
-import { initializeDatabase, loadSettings, queueCounts, saveSettings } from "./src/database";
+import { initializeDatabase, loadSettings, saveSettings } from "./src/database";
 import { beginEnrollment, completeEnrollment } from "./src/enrollment";
 import { enqueueChoices, listAlbums, recentMedia, requestMediaAccess, type AlbumChoice, type MediaChoice } from "./src/media";
-import { configureBackgroundSync, syncCycle } from "./src/sync";
+import { configureBackgroundSync, syncCycle, uploadStatus } from "./src/sync";
 import type { SyncSettings } from "./src/types";
 import { defaultSettings } from "./src/types";
 
@@ -64,7 +64,9 @@ export default function App() {
   const [busy, setBusy] = useState(true);
 
   async function refreshCounts(): Promise<void> {
-    setCounts(await queueCounts());
+    const status = await uploadStatus();
+    setCounts({ pending: status.pending, retry: status.retry, uploaded: status.uploaded });
+    if (status.lastError.length > 0) setMessage(status.lastError);
   }
 
   useEffect(() => {
@@ -74,6 +76,7 @@ export default function App() {
         await initializeDatabase();
         const granted = await requestMediaAccess();
         const [savedSettings, savedToken] = await Promise.all([loadSettings(), getToken()]);
+        if (savedToken !== undefined) await configureBackgroundSync(savedSettings, savedToken);
         if (!mounted) return;
         setSettings(savedSettings);
         setEnrolled(savedToken !== undefined);
@@ -98,9 +101,13 @@ export default function App() {
 
   useEffect(() => {
     if (!settings.automaticSync) return undefined;
-    const subscription = MediaLibrary.addListener(() => void runSync());
+    const subscription = MediaLibrary.addListener(() => {
+      void syncCycle(settings).catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : "Android could not schedule the media change.");
+      });
+    });
     return () => subscription.remove();
-  }, [settings.automaticSync]);
+  }, [settings]);
 
   function update(patch: Partial<SyncSettings>): void {
     setSettings((current) => ({ ...current, ...patch }));
@@ -109,7 +116,8 @@ export default function App() {
   async function persist(): Promise<void> {
     setBusy(true);
     try {
-      await Promise.all([saveSettings(settings), configureBackgroundSync(settings.automaticSync)]);
+      await saveSettings(settings);
+      await configureBackgroundSync(settings);
       setMessage("Settings saved.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Settings could not be saved.");
@@ -133,6 +141,7 @@ export default function App() {
         return;
       }
       await saveToken(result.token);
+      await configureBackgroundSync(settings, result.token);
       setEnrolled(true);
       setPairingCode(undefined);
       setMessage("This device is enrolled. Automatic uploads can now run without reopening Fairth.");
@@ -146,10 +155,14 @@ export default function App() {
   async function runSync(): Promise<void> {
     setBusy(true);
     setMessage("Scanning and uploading…");
-    const result = await syncCycle();
-    setMessage(result.message);
-    await refreshCounts();
-    setBusy(false);
+    try {
+      setMessage(await syncCycle(settings));
+      await refreshCounts();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Android could not schedule the upload.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function queueSelected(): Promise<void> {
