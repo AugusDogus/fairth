@@ -1,25 +1,24 @@
 import { loadConfig } from "./config.js";
-import { createHttpServer } from "./http.js";
+import { createApp } from "./app.js";
 import { createUploadStorage } from "./storage.js";
 
 const config = loadConfig();
 const storage = createUploadStorage(config);
 await storage.initialize();
 
-const server = createHttpServer(config, storage);
-server.listen(config.port, config.host, () => {
-  console.log(JSON.stringify({ level: "info", event: "listening", host: config.host, port: config.port }));
+const app = createApp(config, storage);
+const server = Bun.serve({
+  hostname: config.host,
+  port: config.port,
+  maxRequestBodySize: config.maxUploadBytes,
+  fetch: app.fetch,
 });
+console.log(JSON.stringify({ level: "info", event: "listening", host: server.hostname, port: server.port }));
 
-function shutdown(signal: string): void {
+async function shutdown(signal: string): Promise<void> {
   console.log(JSON.stringify({ level: "info", event: "shutdown", signal }));
-  server.close((error) => {
-    if (error !== undefined) {
-      console.error(error);
-      process.exitCode = 1;
-    }
-  });
+  await server.stop();
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
