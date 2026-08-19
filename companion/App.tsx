@@ -3,56 +3,83 @@ import {
   ActivityIndicator,
   Linking,
   Pressable,
-  SafeAreaView,
   ScrollView,
-  StyleSheet,
-  Switch,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import {
+  initialWindowMetrics,
+  SafeAreaProvider,
+  SafeAreaView,
+} from "react-native-safe-area-context";
 import * as MediaLibrary from "expo-media-library/legacy";
+import { Button } from "heroui-native/button";
+import { Card } from "heroui-native/card";
+import { Input } from "heroui-native/input";
+import { HeroUINativeProvider } from "heroui-native/provider";
+import { Switch } from "heroui-native/switch";
+import { Toaster } from "sonner-native";
 import { getToken, saveToken } from "./src/credentials";
 import { initializeDatabase, loadSettings, saveSettings } from "./src/database";
 import { beginEnrollment, completeEnrollment } from "./src/enrollment";
-import { enqueueChoices, listAlbums, recentMedia, requestMediaAccess, type AlbumChoice, type MediaChoice } from "./src/media";
+import {
+  enqueueChoices,
+  listAlbums,
+  recentMedia,
+  requestMediaAccess,
+  type AlbumChoice,
+  type MediaChoice,
+} from "./src/media";
+import "./src/styles.css";
 import { configureBackgroundSync, syncCycle, uploadStatus } from "./src/sync";
 import type { SyncSettings } from "./src/types";
 import { defaultSettings } from "./src/types";
 
 type Counts = Readonly<{ pending: number; retry: number; uploaded: number }>;
 
-function Field(props: Readonly<{ label: string; value: string; onChange: (value: string) => void; secret?: boolean; keyboard?: "default" | "numeric" }>) {
+type FieldProps = Readonly<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  keyboard?: "default" | "numeric";
+}>;
+
+function Field({ keyboard = "default", label, onChange, value }: FieldProps) {
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{props.label}</Text>
-      <TextInput
+    <View className="flex-1 gap-1.5">
+      <Text className="text-xs font-semibold text-muted">{label}</Text>
+      <Input
         autoCapitalize="none"
         autoCorrect={false}
-        keyboardType={props.keyboard ?? "default"}
-        onChangeText={props.onChange}
-        placeholderTextColor="#718096"
-        secureTextEntry={props.secret === true}
-        style={styles.input}
-        value={props.value}
+        keyboardType={keyboard}
+        onChangeText={onChange}
+        value={value}
       />
     </View>
   );
 }
 
-function Toggle(props: Readonly<{ label: string; detail: string; value: boolean; onChange: (value: boolean) => void }>) {
+type ToggleProps = Readonly<{
+  label: string;
+  detail: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}>;
+
+function Toggle({ detail, label, onChange, value }: ToggleProps) {
   return (
-    <View style={styles.toggleRow}>
-      <View style={styles.toggleCopy}>
-        <Text style={styles.toggleLabel}>{props.label}</Text>
-        <Text style={styles.detail}>{props.detail}</Text>
+    <View className="flex-row items-center border-b border-separator/30 py-3">
+      <View className="flex-1 pr-3">
+        <Text className="text-[15px] font-semibold text-foreground">{label}</Text>
+        <Text className="mt-0.5 text-xs leading-4 text-muted">{detail}</Text>
       </View>
-      <Switch onValueChange={props.onChange} trackColor={{ false: "#334155", true: "#2dd4bf" }} value={props.value} />
+      <Switch isSelected={value} onSelectedChange={onChange} />
     </View>
   );
 }
 
-export default function App() {
+function CompanionApp() {
   const [settings, setSettings] = useState<SyncSettings>(defaultSettings);
   const [enrolled, setEnrolled] = useState(false);
   const [pairingCode, setPairingCode] = useState<string | undefined>();
@@ -96,7 +123,9 @@ export default function App() {
         if (mounted) setBusy(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -130,7 +159,9 @@ export default function App() {
     setBusy(true);
     setMessage("Requesting a device enrollment code…");
     try {
-      const enrollmentEndpoint = settings.lanEndpoint.trim().length > 0 ? settings.lanEndpoint : settings.primaryEndpoint;
+      const enrollmentEndpoint = settings.lanEndpoint.trim().length > 0
+        ? settings.lanEndpoint
+        : settings.primaryEndpoint;
       const challenge = await beginEnrollment(enrollmentEndpoint);
       setPairingCode(challenge.userCode);
       setMessage(`Approve code ${challenge.userCode} in the owner page.`);
@@ -174,7 +205,11 @@ export default function App() {
   }
 
   function toggleAlbum(id: string): void {
-    update({ albumIds: settings.albumIds.includes(id) ? settings.albumIds.filter((value) => value !== id) : [...settings.albumIds, id] });
+    update({
+      albumIds: settings.albumIds.includes(id)
+        ? settings.albumIds.filter((value) => value !== id)
+        : [...settings.albumIds, id],
+    });
   }
 
   function toggleMedia(id: string): void {
@@ -187,104 +222,127 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <View style={styles.hero}>
-          <Text style={styles.eyebrow}>FAIRTH COMPANION</Text>
-          <Text style={styles.title}>Your camera roll, queued safely.</Text>
-          <Text style={styles.subtitle}>LAN first, resumable, and ready to continue when your phone comes back online.</Text>
+    <SafeAreaView className="flex-1 bg-background">
+      <ScrollView
+        className="flex-1"
+        contentContainerClassName="gap-3 px-5 pb-16"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View className="gap-2 py-6">
+          <Text className="text-xs font-extrabold tracking-[2px] text-accent">FAIRTH COMPANION</Text>
+          <Text className="text-[34px] font-extrabold leading-[39px] text-foreground">
+            Your camera roll, queued safely.
+          </Text>
+          <Text className="text-base leading-6 text-muted">
+            LAN first, resumable, and ready to continue when your phone comes back online.
+          </Text>
         </View>
 
-        <View style={styles.statusCard}>
-          <View><Text style={styles.metric}>{counts.pending}</Text><Text style={styles.metricLabel}>Queued</Text></View>
-          <View><Text style={styles.metric}>{counts.retry}</Text><Text style={styles.metricLabel}>Retrying</Text></View>
-          <View><Text style={styles.metric}>{counts.uploaded}</Text><Text style={styles.metricLabel}>Uploaded</Text></View>
-        </View>
-        <Text style={styles.message}>{message}</Text>
-        <Pressable disabled={busy} onPress={() => void runSync()} style={({ pressed }) => [styles.primary, pressed && styles.pressed, busy && styles.disabled]}>
-          {busy ? <ActivityIndicator color="#042f2e" /> : <Text style={styles.primaryText}>Sync now</Text>}
-        </Pressable>
+        <Card className="flex-row justify-around p-5">
+          {([
+            [counts.pending, "Queued"],
+            [counts.retry, "Retrying"],
+            [counts.uploaded, "Uploaded"],
+          ] as const).map(([value, label]) => (
+            <View key={label} className="items-center">
+              <Text className="text-2xl font-extrabold text-surface-foreground">{value}</Text>
+              <Text className="mt-0.5 text-xs text-muted">{label}</Text>
+            </View>
+          ))}
+        </Card>
+        <Text className="min-h-5 text-sm text-muted">{message}</Text>
+        <Button isDisabled={busy} onPress={() => void runSync()} size="lg">
+          {busy ? <ActivityIndicator color="#134e4a" /> : <Button.Label>Sync now</Button.Label>}
+        </Button>
 
-        <Text style={styles.sectionTitle}>Connection</Text>
+        <Text className="mt-5 text-xl font-extrabold text-foreground">Connection</Text>
         <Field label="LAN endpoint" onChange={(lanEndpoint) => update({ lanEndpoint })} value={settings.lanEndpoint} />
         <Field label="Remote fallback endpoint" onChange={(primaryEndpoint) => update({ primaryEndpoint })} value={settings.primaryEndpoint} />
         <Field label="Device ID" onChange={(deviceId) => update({ deviceId })} value={settings.deviceId} />
-        <Text style={styles.detail}>{enrolled ? "Enrolled with a revocable device session." : "Not enrolled yet."}</Text>
-        {pairingCode === undefined ? null : <Text style={styles.pairingCode}>{pairingCode}</Text>}
-        <Pressable disabled={busy} onPress={() => void enrollDevice()} style={styles.secondary}><Text style={styles.secondaryText}>{enrolled ? "Replace device enrollment" : "Enroll this device"}</Text></Pressable>
+        <Text className="text-xs leading-4 text-muted">
+          {enrolled ? "Enrolled with a revocable device session." : "Not enrolled yet."}
+        </Text>
+        {pairingCode === undefined ? null : (
+          <Text className="text-center font-mono text-[28px] font-extrabold tracking-[4px] text-foreground">
+            {pairingCode}
+          </Text>
+        )}
+        <Button isDisabled={busy} onPress={() => void enrollDevice()} variant="outline">
+          {enrolled ? "Replace device enrollment" : "Enroll this device"}
+        </Button>
 
-        <Text style={styles.sectionTitle}>Sync rules</Text>
+        <Text className="mt-5 text-xl font-extrabold text-foreground">Sync rules</Text>
         <Toggle detail="Use cellular only when this is off." label="Wi-Fi only" onChange={(wifiOnly) => update({ wifiOnly })} value={settings.wifiOnly} />
         <Toggle detail="Keep queued work until external power is connected." label="Charging only" onChange={(chargingOnly) => update({ chargingOnly })} value={settings.chargingOnly} />
         <Toggle detail="Let Android schedule deferred work and scan foreground changes." label="Automatic sync" onChange={(automaticSync) => update({ automaticSync })} value={settings.automaticSync} />
-        <View style={styles.windowRow}>
+        <View className="flex-row gap-3">
           <Field keyboard="numeric" label="Start hour" onChange={(value) => update({ windowStart: Math.min(23, Math.max(0, Number(value) || 0)) })} value={String(settings.windowStart)} />
           <Field keyboard="numeric" label="End hour" onChange={(value) => update({ windowEnd: Math.min(24, Math.max(0, Number(value) || 0)) })} value={String(settings.windowEnd)} />
         </View>
-        <Pressable disabled={busy} onPress={() => void persist()} style={styles.secondary}><Text style={styles.secondaryText}>Save settings</Text></Pressable>
+        <Button isDisabled={busy} onPress={() => void persist()} variant="outline">Save settings</Button>
 
-        <Text style={styles.sectionTitle}>Albums</Text>
-        <Text style={styles.detail}>With none selected, automatic sync watches the full camera roll.</Text>
-        <View style={styles.chips}>
-          {albums.map((album) => (
-            <Pressable key={album.id} onPress={() => toggleAlbum(album.id)} style={[styles.chip, settings.albumIds.includes(album.id) && styles.chipSelected]}>
-              <Text style={[styles.chipText, settings.albumIds.includes(album.id) && styles.chipTextSelected]}>{album.title} · {album.assetCount}</Text>
-            </Pressable>
-          ))}
+        <Text className="mt-5 text-xl font-extrabold text-foreground">Albums</Text>
+        <Text className="text-xs leading-4 text-muted">
+          With none selected, automatic sync watches the full camera roll.
+        </Text>
+        <View className="flex-row flex-wrap gap-2">
+          {albums.map((album) => {
+            const isSelected = settings.albumIds.includes(album.id);
+            return (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: isSelected }}
+                className={`rounded-full border px-3 py-2 ${isSelected ? "border-accent bg-accent/20" : "border-border bg-surface"}`}
+                key={album.id}
+                onPress={() => toggleAlbum(album.id)}
+              >
+                <Text className={`text-xs ${isSelected ? "text-foreground" : "text-muted"}`}>
+                  {album.title} · {album.assetCount}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        <Text style={styles.sectionTitle}>Manual selection</Text>
-        {recent.map((item) => (
-          <Pressable key={item.id} onPress={() => toggleMedia(item.id)} style={[styles.mediaRow, selected.has(item.id) && styles.mediaSelected]}>
-            <View style={styles.mediaIcon}><Text>{item.mediaType === "video" ? "▶" : "●"}</Text></View>
-            <View style={styles.mediaCopy}><Text numberOfLines={1} style={styles.mediaName}>{item.filename}</Text><Text style={styles.detail}>{new Date(item.creationTime).toLocaleString()}</Text></View>
-            <Text style={styles.check}>{selected.has(item.id) ? "✓" : ""}</Text>
-          </Pressable>
-        ))}
-        <Pressable disabled={selected.size === 0} onPress={() => void queueSelected()} style={[styles.secondary, selected.size === 0 && styles.disabled]}>
-          <Text style={styles.secondaryText}>Queue {selected.size} selected</Text>
-        </Pressable>
+        <Text className="mt-5 text-xl font-extrabold text-foreground">Manual selection</Text>
+        {recent.map((item) => {
+          const isSelected = selected.has(item.id);
+          return (
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: isSelected }}
+              className={`flex-row items-center rounded-xl border bg-surface p-2.5 ${isSelected ? "border-accent" : "border-border"}`}
+              key={item.id}
+              onPress={() => toggleMedia(item.id)}
+            >
+              <View className="size-10 items-center justify-center rounded-lg bg-default">
+                <Text className="text-default-foreground">{item.mediaType === "video" ? "▶" : "●"}</Text>
+              </View>
+              <View className="ml-2.5 flex-1">
+                <Text className="text-sm font-semibold text-surface-foreground" numberOfLines={1}>{item.filename}</Text>
+                <Text className="text-xs leading-4 text-muted">{new Date(item.creationTime).toLocaleString()}</Text>
+              </View>
+              <Text className="w-7 text-center text-xl font-extrabold text-accent">{isSelected ? "✓" : ""}</Text>
+            </Pressable>
+          );
+        })}
+        <Button isDisabled={selected.size === 0} onPress={() => void queueSelected()} variant="outline">
+          Queue {selected.size} selected
+        </Button>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#07111f" },
-  container: { padding: 20, paddingBottom: 64, gap: 12 },
-  hero: { paddingVertical: 22, gap: 8 },
-  eyebrow: { color: "#2dd4bf", fontSize: 12, fontWeight: "800", letterSpacing: 2 },
-  title: { color: "#f8fafc", fontSize: 34, fontWeight: "800", lineHeight: 39 },
-  subtitle: { color: "#94a3b8", fontSize: 16, lineHeight: 23 },
-  statusCard: { backgroundColor: "#0f1d2e", borderColor: "#1e3349", borderRadius: 18, borderWidth: 1, flexDirection: "row", justifyContent: "space-around", padding: 18 },
-  metric: { color: "#f8fafc", fontSize: 24, fontWeight: "800", textAlign: "center" },
-  metricLabel: { color: "#94a3b8", fontSize: 12, marginTop: 2 },
-  message: { color: "#cbd5e1", minHeight: 20 },
-  primary: { alignItems: "center", backgroundColor: "#2dd4bf", borderRadius: 14, minHeight: 52, justifyContent: "center" },
-  primaryText: { color: "#042f2e", fontSize: 16, fontWeight: "800" },
-  secondary: { alignItems: "center", borderColor: "#2dd4bf", borderRadius: 14, borderWidth: 1, justifyContent: "center", minHeight: 48, marginTop: 4 },
-  secondaryText: { color: "#5eead4", fontSize: 15, fontWeight: "700" },
-  pressed: { opacity: 0.8 },
-  disabled: { opacity: 0.4 },
-  sectionTitle: { color: "#f8fafc", fontSize: 20, fontWeight: "800", marginTop: 22 },
-  field: { flex: 1, gap: 6 },
-  label: { color: "#94a3b8", fontSize: 12, fontWeight: "700" },
-  input: { backgroundColor: "#0f1d2e", borderColor: "#1e3349", borderRadius: 12, borderWidth: 1, color: "#f8fafc", fontSize: 15, paddingHorizontal: 14, paddingVertical: 12 },
-  toggleRow: { alignItems: "center", borderBottomColor: "#17283a", borderBottomWidth: 1, flexDirection: "row", paddingVertical: 10 },
-  toggleCopy: { flex: 1, paddingRight: 12 },
-  toggleLabel: { color: "#e2e8f0", fontSize: 15, fontWeight: "700" },
-  detail: { color: "#718096", fontSize: 12, lineHeight: 17 },
-  windowRow: { flexDirection: "row", gap: 12 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { backgroundColor: "#0f1d2e", borderColor: "#1e3349", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  chipSelected: { backgroundColor: "#134e4a", borderColor: "#2dd4bf" },
-  chipText: { color: "#94a3b8", fontSize: 12 },
-  chipTextSelected: { color: "#ccfbf1" },
-  mediaRow: { alignItems: "center", backgroundColor: "#0f1d2e", borderColor: "#1e3349", borderRadius: 12, borderWidth: 1, flexDirection: "row", padding: 10 },
-  mediaSelected: { borderColor: "#2dd4bf" },
-  mediaIcon: { alignItems: "center", backgroundColor: "#cbd5e1", borderRadius: 8, height: 38, justifyContent: "center", width: 38 },
-  mediaCopy: { flex: 1, marginLeft: 10 },
-  mediaName: { color: "#e2e8f0", fontSize: 14, fontWeight: "600" },
-  check: { color: "#2dd4bf", fontSize: 20, fontWeight: "800", width: 28, textAlign: "center" },
-  pairingCode: { color: "#f8fafc", fontFamily: "monospace", fontSize: 28, fontWeight: "800", letterSpacing: 4, textAlign: "center" },
-});
+export default function App() {
+  return (
+    <GestureHandlerRootView className="flex-1">
+      <HeroUINativeProvider>
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+          <CompanionApp />
+          <Toaster position="top-center" />
+        </SafeAreaProvider>
+      </HeroUINativeProvider>
+    </GestureHandlerRootView>
+  );
+}

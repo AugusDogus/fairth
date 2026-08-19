@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "uniwind";
+@import "heroui-native/styles";
+
+@theme {
+  --radius: 0.5rem;
+}
+
+@layer theme {
+  :root {
+    @variant light {
+      --accent: oklch(0.64 0.12 181);
+      --accent-foreground: oklch(0.18 0.03 181);
+    }
+
+    @variant dark {
+      --accent: oklch(0.76 0.13 181);
+      --accent-foreground: oklch(0.18 0.03 181);
+    }
+  }
+}
