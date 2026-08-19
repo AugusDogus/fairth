@@ -8,6 +8,8 @@ redroid_script_url="https://github.com/ayasa520/redroid-script.git"
 source_image="redroid/redroid:11.0.0_gapps_ndk_magisk"
 output_image="${FAIRTH_REDROID_IMAGE:-localhost/fairth-redroid:11-gapps-ndk-magisk}"
 build_directory="$(mktemp -d /tmp/fairth-redroid-build.XXXXXX)"
+opengapps_archive='open_gapps-x86_64-11.0-mini-20220503.zip'
+opengapps_md5='7669fa5c4e9579194cd354e78382a0ea'
 
 cleanup() {
   case "${build_directory}" in
@@ -24,6 +26,11 @@ for command_name in git lzip python3 "${runtime}"; do
   fi
 done
 
+if [[ "$(uname -m)" != 'x86_64' ]]; then
+  printf '%s\n' 'The bundled Google Photos image build currently supports x86-64 hosts only.' >&2
+  exit 1
+fi
+
 printf '%s\n' \
   'Building a local Redroid image with OpenGApps, Magisk, and ARM translation.' \
   "Pinned image-overlay builder commit: ${redroid_script_commit}"
@@ -32,6 +39,19 @@ git clone --quiet "${redroid_script_url}" "${build_directory}/redroid-script"
 git -C "${build_directory}/redroid-script" checkout --quiet --detach "${redroid_script_commit}"
 if [[ "$(git -C "${build_directory}/redroid-script" rev-parse HEAD)" != "${redroid_script_commit}" ]]; then
   printf '%s\n' 'The checked-out image builder does not match the pinned commit.' >&2
+  exit 1
+fi
+
+gapps_source="${build_directory}/redroid-script/stuff/gapps.py"
+sed -i \
+  -e "s/open_gapps-x86_64-11.0-pico-20220503.zip/${opengapps_archive}/" \
+  -e "s/5a6d242be34ad1acf92899c7732afa1b/${opengapps_md5}/" \
+  -e 's|extract_to = "/tmp/ogapps/extract"|extract_to = os.environ["FAIRTH_OPENGAPPS_EXTRACT_DIR"]|' \
+  "${gapps_source}"
+if ! grep -Fq "${opengapps_archive}" "${gapps_source}" \
+  || ! grep -Fq "${opengapps_md5}" "${gapps_source}" \
+  || ! grep -Fq 'FAIRTH_OPENGAPPS_EXTRACT_DIR' "${gapps_source}"; then
+  printf '%s\n' 'The pinned Redroid builder no longer matches the expected OpenGApps configuration.' >&2
   exit 1
 fi
 
@@ -46,7 +66,8 @@ fi
 
 (
   cd "${build_directory}/redroid-script"
-  "${build_directory}/venv/bin/python" redroid.py \
+  FAIRTH_OPENGAPPS_EXTRACT_DIR="${build_directory}/opengapps" \
+    "${build_directory}/venv/bin/python" redroid.py \
     --android-version 11.0.0 \
     --install-gapps \
     --install-ndk-translation \
@@ -59,5 +80,24 @@ if ! "${runtime}" image inspect "${source_image}" >/dev/null 2>&1; then
   exit 1
 fi
 
-"${runtime}" tag "${source_image}" "${output_image}"
+photos_archive="${build_directory}/opengapps/GApps/photos-x86_64.tar.lz"
+photos_extract="${build_directory}/photos-extract"
+photos_overlay="${build_directory}/photos-overlay"
+if [[ ! -f "${photos_archive}" ]]; then
+  printf '%s\n' 'OpenGApps did not provide the expected Google Photos package.' >&2
+  exit 1
+fi
+
+mkdir -p "${photos_extract}" "${photos_overlay}/system/app"
+tar --lzip --extract --file "${photos_archive}" --directory "${photos_extract}"
+photos_directory="$(find "${photos_extract}" -type d -path '*/app/Photos' -print -quit)"
+if [[ -z "${photos_directory}" ]] \
+  || [[ -z "$(find "${photos_directory}" -type f -name '*.apk' -print -quit)" ]]; then
+  printf '%s\n' 'The OpenGApps Google Photos package did not contain an installable APK.' >&2
+  exit 1
+fi
+
+cp -a "${photos_directory}" "${photos_overlay}/system/app/Photos"
+printf 'FROM %s\nCOPY system /system\n' "${source_image}" \
+  | "${runtime}" build --tag "${output_image}" --file - "${photos_overlay}"
 printf 'Redroid image is ready: %s\n' "${output_image}"

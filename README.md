@@ -30,7 +30,7 @@ Fairth deploys as two containers on a private Docker network. The non-privileged
 
 Redroid needs Android Binder support from the host kernel. It does not use `/dev/kvm`. On Unraid, confirm that `/dev/binder` or a compatible Binder setup exists before deploying.
 
-The stock `redroid/redroid` image is AOSP. It does not include Google Mobile Services, Google Photos, Magisk, or ARM translation. Fairth therefore requires `REDROID_IMAGE` to name an image you built or obtained under licenses that permit those packages. The included builder uses Android 11 because its x86-64 GApps and ARM native-bridge path is the combination its upstream builder documents as working.
+The stock `redroid/redroid` image is AOSP. It does not include Google Mobile Services, Google Photos, Magisk, or ARM translation. Fairth therefore requires `REDROID_IMAGE` to name an image you built or obtained under licenses that permit those packages. The included x86-64 builder uses Android 11 because its GApps and ARM native-bridge path is the combination its upstream builder documents as working. It adds Google Photos from the pinned OpenGApps package, so Photos is present on first boot.
 
 PixelMask does not replace Magisk or Zygisk. It is an LSPosed module, and LSPosed requires Magisk/Zygisk or an equivalent root framework. PixelMask currently publishes an `arm64-v8a` application. An x86-64 Unraid host therefore needs a Redroid image with a working ARM native bridge as well as GApps and Magisk. `bin/fairth-android build-image` uses a pinned revision of the community `redroid-script` project to build that image locally. Review that third-party input and the applicable package licenses before running it. Fairth does not commit or redistribute the resulting proprietary packages.
 
@@ -117,11 +117,11 @@ ADB stays on the private Docker network, and the worker API stays on loopback in
 Place user-supplied files as described in [`artifacts/README.md`](artifacts/README.md):
 
 ```text
-artifacts/apks/*.apk       Google Photos, PixelMask, and other required APKs
+artifacts/apks/*.apk       PixelMask and other additional APKs
 artifacts/modules/*.zip    LSPosed Zygisk module
 ```
 
-The Android worker hashes these files at startup, installs changed APKs, enables Zygisk, installs changed modules, and reboots Android when needed. It then enables PixelMask in LSPosed, replaces only PixelMask's scope with `com.kinginu.pixelmask` and `com.google.android.apps.photos`, restarts Android, and verifies the saved state. PixelMask's upstream default is the original Pixel profile, so Fairth does not need to write private PixelMask preferences. Applied artifact state persists, so ordinary restarts do not reinstall it. Use the onboarding page or `bin/fairth-android reconcile` to retry after fixing a missing artifact or Android prerequisite.
+Google Photos is part of the Fairth Redroid image. The Android worker detects it through Android's package manager, then hashes the user-supplied artifacts at startup, installs changed APKs, enables Zygisk, installs changed modules, and reboots Android when needed. It enables PixelMask in LSPosed, replaces only PixelMask's scope with `com.kinginu.pixelmask` and `com.google.android.apps.photos`, restarts Android, and verifies the saved state. PixelMask's upstream default is the original Pixel profile, so Fairth does not need to write private PixelMask preferences. Applied artifact state persists, so ordinary restarts do not reinstall it. Use the onboarding page or `bin/fairth-android reconcile` to retry after fixing a missing artifact or Android prerequisite.
 
 The authenticated `/onboarding` page reports every automatic check and opens the remaining UI-only steps in the private Android viewer:
 
