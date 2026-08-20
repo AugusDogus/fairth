@@ -43,15 +43,20 @@ if [[ "$(git -C "${build_directory}/redroid-script" rev-parse HEAD)" != "${redro
 fi
 
 gapps_source="${build_directory}/redroid-script/stuff/gapps.py"
+magisk_source="${build_directory}/redroid-script/stuff/magisk.py"
 sed -i \
   -e "s/open_gapps-x86_64-11.0-pico-20220503.zip/${opengapps_archive}/" \
   -e "s/5a6d242be34ad1acf92899c7732afa1b/${opengapps_md5}/" \
   -e 's|extract_to = "/tmp/ogapps/extract"|extract_to = os.environ["FAIRTH_OPENGAPPS_EXTRACT_DIR"]|' \
   "${gapps_source}"
+sed -i \
+  -e 's|extract_to = "/tmp/magisk_unpack"|extract_to = os.environ["FAIRTH_MAGISK_EXTRACT_DIR"]|' \
+  "${magisk_source}"
 if ! grep -Fq "${opengapps_archive}" "${gapps_source}" \
   || ! grep -Fq "${opengapps_md5}" "${gapps_source}" \
-  || ! grep -Fq 'FAIRTH_OPENGAPPS_EXTRACT_DIR' "${gapps_source}"; then
-  printf '%s\n' 'The pinned Redroid builder no longer matches the expected OpenGApps configuration.' >&2
+  || ! grep -Fq 'FAIRTH_OPENGAPPS_EXTRACT_DIR' "${gapps_source}" \
+  || ! grep -Fq 'FAIRTH_MAGISK_EXTRACT_DIR' "${magisk_source}"; then
+  printf '%s\n' 'The pinned Redroid builder no longer matches the expected OpenGApps or Magisk configuration.' >&2
   exit 1
 fi
 
@@ -67,6 +72,7 @@ fi
 (
   cd "${build_directory}/redroid-script"
   FAIRTH_OPENGAPPS_EXTRACT_DIR="${build_directory}/opengapps" \
+    FAIRTH_MAGISK_EXTRACT_DIR="${build_directory}/magisk" \
     "${build_directory}/venv/bin/python" redroid.py \
     --android-version 11.0.0 \
     --install-gapps \
@@ -99,6 +105,13 @@ if [[ -z "${photos_directory}" ]] \
 fi
 
 cp -a "${photos_directory}" "${photos_overlay}/system/app/Photos"
+magisk_util_functions="${build_directory}/magisk/assets/util_functions.sh"
+if [[ ! -f "${magisk_util_functions}" ]]; then
+  printf '%s\n' 'The Magisk package did not provide util_functions.sh.' >&2
+  exit 1
+fi
+mkdir -p "${photos_overlay}/system/etc/init/magisk"
+cp "${magisk_util_functions}" "${photos_overlay}/system/etc/init/magisk/util_functions.sh"
 cp "${project_directory}/deployment/android/lmkd.rc" "${photos_overlay}/system/etc/init/lmkd.rc"
 printf 'FROM %s\nCOPY system /system\n' "${source_image}" \
   | "${runtime}" build --tag "${output_image}" --file - "${photos_overlay}"

@@ -13,6 +13,9 @@ connect_android() {
 
 wait_for_android() {
   until connect_android; do
+    if test "$(adb -s "${adb_endpoint}" shell getprop init.svc.system_server 2>/dev/null | tr -d '\r')" = "running"; then
+      adb -s "${adb_endpoint}" shell setprop service.bootanim.exit 1 >/dev/null 2>&1 || true
+    fi
     printf '%s\n' 'Waiting for Android to finish booting.'
     sleep 3
   done
@@ -21,6 +24,10 @@ wait_for_android() {
 root_shell() {
   escaped_script="$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
   adb -s "${adb_endpoint}" shell "su 0 sh -c '${escaped_script}'"
+}
+
+prepare_magisk_runtime() {
+  root_shell 'set -eu; source=/system/etc/init/magisk; target=/data/adb/magisk; test -x "$source/busybox"; test -f "$source/util_functions.sh"; mkdir -p "$target"; cp -f "$source/busybox" "$target/busybox"; cp -f "$source/util_functions.sh" "$target/util_functions.sh"; chmod 0755 "$target/busybox"; chmod 0644 "$target/util_functions.sh"; chown 0:0 "$target/busybox" "$target/util_functions.sh"'
 }
 
 artifact_hash() {
@@ -93,6 +100,7 @@ provision_artifacts() {
 
     module_count="$(find "${artifacts_directory}"/modules -maxdepth 1 -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
     if test "${module_count}" -gt 0; then
+      prepare_magisk_runtime
       root_shell '/sbin/magisk -v' >/dev/null 2>&1
       root_shell '/sbin/magisk --sqlite "INSERT OR REPLACE INTO settings (key,value) VALUES (\"zygisk\",1);"'
       module_index=0
