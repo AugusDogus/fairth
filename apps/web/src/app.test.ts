@@ -75,10 +75,26 @@ async function fixture() {
 }
 
 describe("web boundaries", () => {
-  test("accepts opaque origins only when the request URL is same-origin", async () => {
+  test("accepts same-origin requests through a trusted public proxy", async () => {
     const { config, cleanup } = await fixture();
     try {
+      const proxiedConfig: Config = { ...config, publicBaseUrl: "https://fairth.example-tailnet.ts.net:3443" };
       expect(sameOrigin(new Request("http://127.0.0.1:3000/actions/login", { headers: { origin: "null" } }), config)).toBe(true);
+      expect(sameOrigin(new Request("http://127.0.0.1:3000/actions/login", {
+        headers: {
+          host: "127.0.0.1:3000",
+          origin: "null",
+          "x-forwarded-host": "fairth.example-tailnet.ts.net:3443",
+          "x-forwarded-proto": "https",
+        },
+      }), proxiedConfig)).toBe(true);
+      expect(sameOrigin(new Request("http://127.0.0.1:3000/actions/login", {
+        headers: {
+          origin: "null",
+          "x-forwarded-host": "attacker.example",
+          "x-forwarded-proto": "https",
+        },
+      }), proxiedConfig)).toBe(false);
       expect(sameOrigin(new Request("http://127.0.0.1:3000/actions/login", { headers: { origin: "https://attacker.example" } }), config)).toBe(false);
     } finally {
       await cleanup();
