@@ -14,6 +14,18 @@ export function pixelMaskPreferencesReady(preferences: string): boolean {
   return !moduleDisabled && originalPixelSelected;
 }
 
+export function onboardingActionArgs(action: AndroidAction, googlePhotosPackage: string): readonly string[] {
+  if (action === "open_google_account") {
+    return ["shell", "am", "start", "-a", "android.settings.ADD_ACCOUNT_SETTINGS"];
+  }
+  return [
+    "shell", "am", "start",
+    "-a", "android.intent.action.MAIN",
+    "-c", "android.intent.category.LAUNCHER",
+    "-p", googlePhotosPackage,
+  ];
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -135,10 +147,7 @@ export function createAdb(config: Config) {
   }
 
   async function onboardingAction(action: AndroidAction): Promise<CommandResult> {
-    if (action === "open_google_account") {
-      return command(["shell", "am", "start", "-a", "android.settings.ADD_ACCOUNT_SETTINGS"]);
-    }
-    return command(["shell", "monkey", "-p", config.googlePhotosPackage, "1"]);
+    return command(onboardingActionArgs(action, config.googlePhotosPackage));
   }
 
   async function importMedia(localPath: string, remoteFilename: string): Promise<CommandResult> {

@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { pixelMaskPreferencesReady } from "./adb.js";
+import { onboardingActionArgs, pixelMaskPreferencesReady } from "./adb.js";
+
+describe("Android onboarding actions", () => {
+  test("opens Google Photos through its launcher intent without Monkey", () => {
+    expect(onboardingActionArgs("open_photos", "com.google.android.apps.photos")).toEqual([
+      "shell", "am", "start",
+      "-a", "android.intent.action.MAIN",
+      "-c", "android.intent.category.LAUNCHER",
+      "-p", "com.google.android.apps.photos",
+    ]);
+  });
+});
 
 describe("PixelMask preferences", () => {
   test("accepts upstream defaults and the explicit original Pixel profile", () => {
