@@ -8,12 +8,3 @@ service lmkd /system/bin/lmkd
 
 on property:lmkd.reinit=1
     exec_background /system/bin/lmkd --reinit
-
-service fairth-network /system/bin/fairth-network
-    class core
-    user root
-    group root
-    disabled
-
-on property:sys.boot_completed=1
-    start fairth-network
