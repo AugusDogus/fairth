@@ -10,7 +10,7 @@ if [ -z "${gateway}" ] || [ -z "${address}" ] || [ -z "${subnet}" ]; then
     exit 1
 fi
 
-if ! ip rule show | awk '$1 == "18000:" && $0 ~ /lookup main$/ { found = 1 } END { exit found ? 0 : 1 }'; then
+if ! ip rule show | awk '$1 == "18000:" && $NF == "main" { found = 1 } END { exit found ? 0 : 1 }'; then
     ip rule add pref 18000 from all lookup main >/dev/null 2>&1 || exit 1
 fi
 ip route replace "${subnet}" dev eth0 src "${address}" >/dev/null 2>&1 || exit 1
