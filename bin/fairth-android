@@ -321,7 +321,10 @@ case "${command_name}" in
     "${runtime}" exec --interactive --tty "${android_container_name}" /system/bin/sh
     ;;
   reconcile)
-    "${runtime}" exec "${container_name}" /usr/local/bin/fairth-provision-android
+    "${runtime}" exec \
+      --env PROVISIONING_STATE_DIRECTORY=/data/fairth/provisioning \
+      "${container_name}" \
+      /usr/local/bin/fairth-provision-android
     ;;
   reboot)
     "${runtime}" exec "${container_name}" /bin/bash -c 'adb connect "${ADB_ENDPOINT}" >/dev/null || true; adb -s "${ADB_ENDPOINT}" reboot'
