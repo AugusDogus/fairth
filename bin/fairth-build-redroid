@@ -8,10 +8,14 @@ redroid_script_url="https://github.com/ayasa520/redroid-script.git"
 source_image="redroid/redroid:11.0.0_gapps_ndk_magisk"
 output_image="${FAIRTH_REDROID_IMAGE:-localhost/fairth-redroid:11-gapps-ndk-magisk}"
 build_directory="$(mktemp -d /tmp/fairth-redroid-build.XXXXXX)"
+source_container=''
 opengapps_archive='open_gapps-x86_64-11.0-mini-20220503.zip'
 opengapps_md5='7669fa5c4e9579194cd354e78382a0ea'
 
 cleanup() {
+  if [[ -n "${source_container}" ]]; then
+    "${runtime}" rm --force "${source_container}" >/dev/null 2>&1 || true
+  fi
   case "${build_directory}" in
     /tmp/fairth-redroid-build.*) rm -rf -- "${build_directory}" ;;
   esac
@@ -99,7 +103,8 @@ mkdir -p \
   "${photos_extract}" \
   "${photos_overlay}/system/app" \
   "${photos_overlay}/system/bin" \
-  "${photos_overlay}/system/etc/init"
+  "${photos_overlay}/system/etc/init" \
+  "${photos_overlay}/vendor/etc/init"
 tar --lzip --extract --file "${photos_archive}" --directory "${photos_extract}"
 photos_directory="$(find "${photos_extract}" -type d -path '*/app/Photos' -print -quit)"
 if [[ -z "${photos_directory}" ]] \
@@ -117,15 +122,21 @@ fi
 mkdir -p "${photos_overlay}/system/etc/init/magisk"
 cp "${magisk_util_functions}" "${photos_overlay}/system/etc/init/magisk/util_functions.sh"
 cp "${project_directory}/deployment/android/lmkd.rc" "${photos_overlay}/system/etc/init/lmkd.rc"
-cp "${project_directory}/deployment/android/fairth-network.rc" \
-  "${photos_overlay}/fairth-network.rc"
 cp "${project_directory}/deployment/android/fairth-network" \
   "${photos_overlay}/system/bin/fairth-network"
 chmod 0755 "${photos_overlay}/system/bin/fairth-network"
+source_container="$("${runtime}" create "${source_image}")"
+"${runtime}" cp \
+  "${source_container}:/vendor/etc/init/redroid.common.rc" \
+  "${photos_overlay}/vendor/etc/init/redroid.common.rc"
+"${runtime}" rm "${source_container}" >/dev/null
+source_container=''
+printf '\n' >> "${photos_overlay}/vendor/etc/init/redroid.common.rc"
+cat "${project_directory}/deployment/android/fairth-network.rc" \
+  >> "${photos_overlay}/vendor/etc/init/redroid.common.rc"
 printf '%s\n' \
   "FROM ${source_image}" \
   'COPY system /system' \
-  'COPY fairth-network.rc /fairth-network.rc' \
-  'RUN cat /fairth-network.rc >> /vendor/etc/init/redroid.common.rc && rm /fairth-network.rc' \
+  'COPY vendor /vendor' \
   | "${runtime}" build --tag "${output_image}" --file - "${photos_overlay}"
 printf 'Redroid image is ready: %s\n' "${output_image}"
