@@ -1,8 +1,0 @@
-service fairth-network /system/bin/fairth-network
-    class core
-    user root
-    group root
-    disabled
-
-on property:sys.boot_completed=1
-    start fairth-network
