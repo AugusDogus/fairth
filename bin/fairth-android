@@ -169,6 +169,7 @@ start_appliance() {
     --volume "${android_data_path}:/data"
     "${redroid_image}"
     androidboot.hardware=redroid
+    "androidboot.fairth_gateway=${network_gateway}"
     "androidboot.redroid_width=${width}"
     "androidboot.redroid_height=${height}"
     "androidboot.redroid_dpi=${dpi}"

@@ -95,7 +95,11 @@ if [[ ! -f "${photos_archive}" ]]; then
   exit 1
 fi
 
-mkdir -p "${photos_extract}" "${photos_overlay}/system/app" "${photos_overlay}/system/etc/init"
+mkdir -p \
+  "${photos_extract}" \
+  "${photos_overlay}/system/app" \
+  "${photos_overlay}/system/bin" \
+  "${photos_overlay}/system/etc/init"
 tar --lzip --extract --file "${photos_archive}" --directory "${photos_extract}"
 photos_directory="$(find "${photos_extract}" -type d -path '*/app/Photos' -print -quit)"
 if [[ -z "${photos_directory}" ]] \
@@ -113,6 +117,11 @@ fi
 mkdir -p "${photos_overlay}/system/etc/init/magisk"
 cp "${magisk_util_functions}" "${photos_overlay}/system/etc/init/magisk/util_functions.sh"
 cp "${project_directory}/deployment/android/lmkd.rc" "${photos_overlay}/system/etc/init/lmkd.rc"
+cp "${project_directory}/deployment/android/fairth-network.rc" \
+  "${photos_overlay}/system/etc/init/fairth-network.rc"
+cp "${project_directory}/deployment/android/fairth-network" \
+  "${photos_overlay}/system/bin/fairth-network"
+chmod 0755 "${photos_overlay}/system/bin/fairth-network"
 printf 'FROM %s\nCOPY system /system\n' "${source_image}" \
   | "${runtime}" build --tag "${output_image}" --file - "${photos_overlay}"
 printf 'Redroid image is ready: %s\n' "${output_image}"

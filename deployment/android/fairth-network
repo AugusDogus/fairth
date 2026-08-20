@@ -1,0 +1,19 @@
+#!/system/bin/sh
+
+# Android's network daemon can remove Docker's main routing rule after boot.
+# Keep the private bridge route available for ADB and Android internet access.
+while true; do
+    gateway="$(getprop ro.boot.fairth_gateway)"
+    address="$(ip -4 -o address show dev eth0 scope global 2>/dev/null | awk 'NR == 1 { split($4, parts, "/"); print parts[1] }')"
+    subnet="$(ip -4 route show dev eth0 scope link 2>/dev/null | awk '$1 != "default" { print $1; exit }')"
+
+    if [ -n "${gateway}" ] && [ -n "${address}" ] && [ -n "${subnet}" ]; then
+        if ! ip rule show | awk '$1 == "18000:" && $0 ~ /lookup main$/ { found = 1 } END { exit found ? 0 : 1 }'; then
+            ip rule add pref 18000 from all lookup main >/dev/null 2>&1
+        fi
+        ip route replace "${subnet}" dev eth0 src "${address}" >/dev/null 2>&1
+        ip route replace default via "${gateway}" dev eth0 >/dev/null 2>&1
+    fi
+
+    sleep 2
+done
