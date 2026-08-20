@@ -46,13 +46,19 @@ configure_pixelmask() {
   pixelmask_path="$(adb -s "${adb_endpoint}" shell pm path "${pixelmask_package}" 2>/dev/null | tr -d '\r' | sed -n '1s/^package://p')"
   if test -z "${pixelmask_path}"; then return; fi
   case "${pixelmask_path}" in
-    *[!A-Za-z0-9_./-]*)
+    *[!A-Za-z0-9_./~+=-]*)
       printf 'PixelMask reported an unsafe APK path: %s\n' "${pixelmask_path}" >&2
       return 1
       ;;
   esac
 
-  if ! root_shell "test -f ${lsposed_database}" >/dev/null 2>&1; then
+  database_attempt=0
+  until root_shell "test -f ${lsposed_database}" >/dev/null 2>&1; do
+    database_attempt=$((database_attempt + 1))
+    if test "${database_attempt}" -ge 30; then break; fi
+    sleep 2
+  done
+  if test "${database_attempt}" -ge 30; then
     printf '%s\n' 'PixelMask is installed, but the LSPosed configuration database is unavailable.' >&2
     return 1
   fi
@@ -75,8 +81,6 @@ configure_pixelmask() {
   fi
 
   adb -s "${adb_endpoint}" shell am force-stop "${photos_package}" >/dev/null 2>&1 || true
-  adb -s "${adb_endpoint}" reboot >/dev/null 2>&1 || true
-  wait_for_android
   verified_scope="$(root_shell "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
   test "${verified_scope}" = '1:2'
 }
@@ -117,8 +121,8 @@ provision_artifacts() {
 
     printf '%s\n' "${current_hash}" >"${state_directory}/artifacts.pending.sha256"
     if test "${module_count}" -gt 0; then
-      adb -s "${adb_endpoint}" reboot >/dev/null 2>&1 || true
-      wait_for_android
+      printf '%s\n' 'Android container recreation is required to activate the installed Magisk modules.'
+      exit 75
     fi
   else
     printf '%s\n' 'Resuming Android provisioning after a required reboot.'

@@ -104,8 +104,10 @@ start_appliance() {
   local boot_complete
   local boot_attempt
   local existing_name
+  local provisioning_status
   local -a android_arguments
   local -a fairth_arguments
+  local -a provisioning_arguments
 
   check_host
   for existing_name in "${android_container_name}" "${container_name}"; do
@@ -185,21 +187,55 @@ start_appliance() {
     ro.dalvik.vm.native.bridge=libndk_translation.so
     ro.ndk_translation.version=0.2.3
   )
-  "${runtime}" "${android_arguments[@]}" >/dev/null
 
-  # Redroid disables the animation, but Android 11 still waits for its completion signal.
-  boot_complete=""
-  for ((boot_attempt = 0; boot_attempt < 120; boot_attempt += 1)); do
-    system_server_state="$("${runtime}" exec "${android_container_name}" getprop init.svc.system_server 2>/dev/null | tr -d '\r' || true)"
-    if [[ "${system_server_state}" == running ]]; then
-      "${runtime}" exec "${android_container_name}" setprop service.bootanim.exit 1 >/dev/null 2>&1 || true
+  start_android_container() {
+    "${runtime}" "${android_arguments[@]}" >/dev/null
+
+    # Redroid disables the animation, but Android 11 still waits for its completion signal.
+    boot_complete=""
+    for ((boot_attempt = 0; boot_attempt < 120; boot_attempt += 1)); do
+      system_server_state="$("${runtime}" exec "${android_container_name}" getprop init.svc.system_server 2>/dev/null | tr -d '\r' || true)"
+      if [[ "${system_server_state}" == running ]]; then
+        "${runtime}" exec "${android_container_name}" setprop service.bootanim.exit 1 >/dev/null 2>&1 || true
+      fi
+      boot_complete="$("${runtime}" exec "${android_container_name}" getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+      if [[ "${boot_complete}" == 1 ]]; then break; fi
+      sleep 2
+    done
+    if [[ "${boot_complete}" != 1 ]]; then
+      printf '%s\n' 'Android did not finish booting within four minutes. Review the host kernel and Android logs.' >&2
+      "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null 2>&1 || true
+      return 1
     fi
-    boot_complete="$("${runtime}" exec "${android_container_name}" getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-    if [[ "${boot_complete}" == 1 ]]; then break; fi
-    sleep 2
-  done
-  if [[ "${boot_complete}" != 1 ]]; then
-    printf '%s\n' 'Android did not finish booting within four minutes. Review the host kernel and Android logs.' >&2
+  }
+
+  start_android_container
+
+  provisioning_arguments=(
+    run --rm
+    --network "${network_name}"
+    --volume "${data_path}:/data"
+    --volume "${project_dir}/artifacts:/artifacts:ro"
+  )
+  if [[ -f "${env_file}" ]]; then provisioning_arguments+=(--env-file "${env_file}"); fi
+  provisioning_arguments+=(
+    --env "ADB_ENDPOINT=${network_gateway}:5555"
+    --env PROVISIONING_STATE_DIRECTORY=/data/fairth/provisioning
+    --entrypoint /usr/local/bin/fairth-provision-android
+    "${appliance_image}"
+  )
+
+  provisioning_status=0
+  "${runtime}" "${provisioning_arguments[@]}" || provisioning_status=$?
+  if [[ "${provisioning_status}" -eq 75 ]]; then
+    printf '%s\n' 'Recreating Android once to activate its installed modules.'
+    "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null
+    start_android_container
+    provisioning_status=0
+    "${runtime}" "${provisioning_arguments[@]}" || provisioning_status=$?
+  fi
+  if [[ "${provisioning_status}" -ne 0 ]]; then
+    printf 'Automatic Android provisioning failed with status %s. Android data was preserved.\n' "${provisioning_status}" >&2
     "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null 2>&1 || true
     return 1
   fi
