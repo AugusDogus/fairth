@@ -4,15 +4,22 @@ import { deviceAuthorizationClient } from "better-auth/client/plugins";
 const clientId = "fairth-companion";
 const deviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
 
-export type EnrollmentChallenge = Readonly<{
+export type EnrollmentRedemption = Readonly<{
   baseUrl: string;
   deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete: string;
   expiresAt: number;
   intervalSeconds: number;
 }>;
+
+export type EnrollmentChallenge = EnrollmentRedemption & Readonly<{
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+}>;
+
+export type PairingScanResult =
+  | Readonly<{ ok: true; redemption: EnrollmentRedemption }>
+  | Readonly<{ ok: false; message: string }>;
 
 export type EnrollmentResult =
   | Readonly<{ ok: true; token: string }>
@@ -24,6 +31,64 @@ function endpoint(value: string): string {
 
 function client(baseUrl: string) {
   return createAuthClient({ baseURL: baseUrl, plugins: [deviceAuthorizationClient()] });
+}
+
+export function parsePairingScan(value: string, now = Date.now()): PairingScanResult {
+  let pairingUri: URL;
+  try {
+    pairingUri = new URL(value);
+  } catch {
+    return { ok: false, message: "That is not a Fairth pairing QR code." };
+  }
+  if (pairingUri.protocol !== "fairth:" || pairingUri.hostname !== "pair" || pairingUri.searchParams.get("v") !== "1") {
+    return { ok: false, message: "That is not a Fairth pairing QR code." };
+  }
+
+  const endpointValue = pairingUri.searchParams.get("endpoint");
+  const deviceCode = pairingUri.searchParams.get("device_code");
+  const expiresAt = Number(pairingUri.searchParams.get("expires_at"));
+  const intervalSeconds = Number(pairingUri.searchParams.get("interval"));
+  if (endpointValue === null || deviceCode === null) {
+    return { ok: false, message: "This Fairth QR code is incomplete. Create a new code and scan it again." };
+  }
+
+  let endpointUrl: URL;
+  try {
+    endpointUrl = new URL(endpointValue);
+  } catch {
+    return { ok: false, message: "This Fairth QR code contains an invalid appliance address." };
+  }
+  const supportedProtocol = endpointUrl.protocol === "https:" || endpointUrl.protocol === "http:";
+  if (
+    !supportedProtocol
+    || endpointUrl.username.length > 0
+    || endpointUrl.password.length > 0
+    || endpointUrl.search.length > 0
+    || endpointUrl.hash.length > 0
+  ) {
+    return { ok: false, message: "This Fairth QR code contains an invalid appliance address." };
+  }
+  if (!/^[A-Za-z0-9_-]{20,256}$/.test(deviceCode)) {
+    return { ok: false, message: "This Fairth QR code contains an invalid device challenge." };
+  }
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) {
+    return { ok: false, message: "This Fairth QR code expired. Create a new code on the onboarding page." };
+  }
+  if (expiresAt > now + 31 * 60 * 1000) {
+    return { ok: false, message: "This Fairth QR code has an invalid expiration time." };
+  }
+  if (!Number.isSafeInteger(intervalSeconds) || intervalSeconds < 1 || intervalSeconds > 60) {
+    return { ok: false, message: "This Fairth QR code contains an invalid polling interval." };
+  }
+  return {
+    ok: true,
+    redemption: {
+      baseUrl: endpoint(endpointUrl.toString()),
+      deviceCode,
+      expiresAt,
+      intervalSeconds,
+    },
+  };
 }
 
 export async function beginEnrollment(baseUrlValue: string): Promise<EnrollmentChallenge> {
@@ -47,7 +112,7 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function completeEnrollment(challenge: EnrollmentChallenge, deviceId: string): Promise<EnrollmentResult> {
+export async function completeEnrollment(challenge: EnrollmentRedemption, deviceId: string): Promise<EnrollmentResult> {
   let intervalSeconds = Math.max(1, challenge.intervalSeconds);
   while (Date.now() < challenge.expiresAt) {
     await wait(intervalSeconds * 1000);

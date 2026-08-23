@@ -8,6 +8,7 @@ class FairthBackgroundUploadModule extends NativeModule<{}> {
   async configure(): Promise<void> { this.unsupported(); }
   async runNow(): Promise<void> { this.unsupported(); }
   async enqueueManualAssets(): Promise<number> { return this.unsupported(); }
+  async enqueueSharedImages(): Promise<number> { return this.unsupported(); }
   async getStatus(): Promise<never> { return this.unsupported(); }
 }
 

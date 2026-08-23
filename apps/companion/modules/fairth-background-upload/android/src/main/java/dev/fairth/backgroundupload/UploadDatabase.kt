@@ -22,6 +22,14 @@ internal data class UploadRecord(
   val attempts: Int,
 )
 
+internal data class QueueCounts(
+  val pending: Int,
+  val retry: Int,
+  val uploaded: Int,
+) {
+  val total: Int = pending + retry + uploaded
+}
+
 internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fairth-background-upload.sqlite", null, 1) {
   override fun onConfigure(database: SQLiteDatabase) {
     database.setForeignKeyConstraintsEnabled(true)
@@ -48,6 +56,11 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     )
     database.execSQL("CREATE INDEX upload_queue_work ON upload_queue(status, next_attempt_at, captured_at)")
     database.execSQL("CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+  }
+
+  override fun onOpen(database: SQLiteDatabase) {
+    super.onOpen(database)
+    recoverInterruptedUploads(database)
   }
 
   override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
@@ -120,22 +133,48 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     )
   }
 
-  fun counts(): Map<String, Any> {
-    val counts = mutableMapOf("pending" to 0, "retry" to 0, "uploaded" to 0)
+  fun recoverInterruptedUploads() = recoverInterruptedUploads(writableDatabase)
+
+  fun queueCounts(): QueueCounts {
+    var pending = 0
+    var retry = 0
+    var uploaded = 0
     readableDatabase.rawQuery("SELECT status, COUNT(*) AS total FROM upload_queue GROUP BY status", null).use { cursor ->
       while (cursor.moveToNext()) {
         val status = cursor.getString(0)
         val total = cursor.getInt(1)
         when (status) {
-          "pending", "uploading" -> counts["pending"] = (counts["pending"] ?: 0) + total
-          "retry" -> counts["retry"] = total
-          "uploaded" -> counts["uploaded"] = total
+          "pending", "uploading" -> pending += total
+          "retry" -> retry = total
+          "uploaded" -> uploaded = total
         }
       }
     }
-    return counts + mapOf(
+    return QueueCounts(pending = pending, retry = retry, uploaded = uploaded)
+  }
+
+  fun counts(eligible: Int): Map<String, Any> {
+    val counts = queueCounts()
+    return mapOf(
+      "pending" to counts.pending,
+      "retry" to counts.retry,
+      "uploaded" to counts.uploaded,
+      "eligible" to eligible,
       "lastRunAt" to (state("last_run_at")?.toLongOrNull() ?: 0L),
       "lastError" to (state("last_error") ?: ""),
+    )
+  }
+
+  fun retainBuckets(bucketIds: Set<String>) {
+    if (bucketIds.isEmpty()) {
+      writableDatabase.delete("upload_queue", "bucket_id != ?", arrayOf(SHARED_BUCKET))
+      return
+    }
+    val placeholders = bucketIds.joinToString(",") { "?" }
+    writableDatabase.delete(
+      "upload_queue",
+      "bucket_id != ? AND bucket_id NOT IN ($placeholders)",
+      arrayOf(SHARED_BUCKET, *bucketIds.toTypedArray()),
     )
   }
 
@@ -163,6 +202,12 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     writableDatabase.update("upload_queue", values, "media_key = ?", arrayOf(mediaKey))
   }
 
+  private fun recoverInterruptedUploads(database: SQLiteDatabase) {
+    database.execSQL(
+      "UPDATE upload_queue SET status = 'retry', next_attempt_at = 0, last_error = 'The previous upload was interrupted and will resume.' WHERE status = 'uploading'",
+    )
+  }
+
   private fun uploadRecord(cursor: Cursor): UploadRecord = UploadRecord(
     media = MediaRecord(
       mediaKey = cursor.string("media_key"),
@@ -183,6 +228,16 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
   private fun Cursor.int(column: String): Int = getInt(getColumnIndexOrThrow(column))
 
   private companion object {
+    const val SHARED_BUCKET = "shared"
     const val STALE_UPLOAD_MS = 60L * 60L * 1_000L
+  }
+}
+
+internal object UploadDatabaseProvider {
+  @Volatile
+  private var instance: UploadDatabase? = null
+
+  fun get(context: Context): UploadDatabase = instance ?: synchronized(this) {
+    instance ?: UploadDatabase(context.applicationContext).also { instance = it }
   }
 }

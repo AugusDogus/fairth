@@ -1,0 +1,66 @@
+diff --git a/node_modules/expo-share-intent/.bun-tag-226a8c26c80bd0af b/.bun-tag-226a8c26c80bd0af
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index ff5b1001e7bb3443482727cec48c22579465c73b..9e403506f5001305b4e1bcb7bd924dc5800ba6b4 100644
+--- a/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -63,17 +63,31 @@ class ExpoShareIntentModule : Module() {
+                 notifyError("Cannot get resolver (getFileInfo)")
+                 return mapOf(
+                     "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
++                    "filePath" to if (uri.scheme.equals("file", ignoreCase = true)) uri.path else null,
+                 )
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
++            val mimeType = runCatching { resolver.getType(uri) }.getOrNull() ?: "application/octet-stream"
++            val queryResult: Cursor? = runCatching { resolver.query(uri, null, null, null, null) }.getOrNull()
++            if (queryResult == null || !queryResult.moveToFirst()) {
++                queryResult?.close()
++                notifyError("The shared file is not readable.")
++                return mapOf(
++                        "contentUri" to uri.toString(),
++                        "filePath" to if (uri.scheme.equals("file", ignoreCase = true)) uri.path else null,
++                        "fileName" to null,
++                        "fileSize" to null,
++                        "mimeType" to mimeType,
++                        "width" to null,
++                        "height" to null,
++                        "duration" to null
++                )
++            }
++            val fileNameColumn = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++            val fileSizeColumn = queryResult.getColumnIndex(OpenableColumns.SIZE)
++            val fileName = if (fileNameColumn >= 0) queryResult.getString(fileNameColumn) else null
++            val fileSize = if (fileSizeColumn >= 0) queryResult.getString(fileSizeColumn) else null
+             queryResult.close()
+ 
+-            val mimeType = resolver.getType(uri)!!
+-
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+             var mediaDuration: String? = null;
+@@ -81,7 +95,9 @@ class ExpoShareIntentModule : Module() {
+                 val options = BitmapFactory.Options().apply {
+                     inJustDecodeBounds = true
+                 }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
++                runCatching {
++                    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
++                }
+                 mediaHeight = options.outHeight.toString()
+                 mediaWidth = options.outWidth.toString()
+             }
+@@ -101,7 +117,7 @@ class ExpoShareIntentModule : Module() {
+ 
+             return mapOf(
+                     "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
++                    "filePath" to if (uri.scheme.equals("file", ignoreCase = true)) uri.path else null,
+                     "fileName" to fileName,
+                     "fileSize" to fileSize,
+                     "mimeType" to mimeType,

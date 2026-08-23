@@ -1,14 +1,21 @@
 {
   "expo": {
-    "name": "Fairth Companion",
+    "name": "Fairth",
     "slug": "fairth-companion",
     "scheme": "fairth",
     "version": "1.0.0",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "dev.fairth.companion",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#3157E8"
+      },
       "permissions": [
+        "CAMERA",
+        "ACCESS_MEDIA_LOCATION",
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
         "READ_EXTERNAL_STORAGE",
@@ -24,6 +31,20 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Fairth uses the camera to scan a one-time pairing QR code."
+        }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": ["image/*"],
+          "androidMultiIntentFilters": ["image/*"],
+          "disableIOS": true
+        }
+      ],
       [
         "expo-build-properties",
         {

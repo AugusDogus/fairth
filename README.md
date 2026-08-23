@@ -186,6 +186,8 @@ In the app:
 4. Select albums, or leave all albums unselected to watch the full camera roll.
 5. Enable automatic sync and the desired Wi-Fi, charging, and time-window rules.
 
+To upload only a few photos, leave automatic sync off and share one or more images to **Fairth Companion** from Android's share sheet. Fairth copies the shared images into its durable queue, schedules an upload using the saved Wi-Fi and charging rules, and closes. This path does not need photo-library permission and does not scan or queue the rest of the camera roll.
+
 The companion requires a development or release Android build. It does not run in Expo Go because its uploader is a local native module. The LAN endpoint is probed first on every run. If unavailable, the uploader tries the remote endpoint.
 
 Android WorkManager performs MediaStore discovery, persistent SQLite queueing, and resumable HTTP transfer without launching the Expo JavaScript runtime. Work is restored after app-process death and phone reboot, honors Wi-Fi and charging constraints, and runs at Android's minimum periodic interval of 15 minutes. Active large transfers use a `dataSync` foreground notification and stop after a bounded run; remaining chunks continue in later work. Android still controls exact timing. Explicitly force-stopping the app disables all of its scheduled work until the user launches it again, which no Android app can bypass.

@@ -8,39 +8,52 @@ import android.os.Build
 import android.provider.MediaStore
 import org.json.JSONArray
 
-internal data class ScanResult(val queued: Int, val hasMore: Boolean)
+internal data class ScanResult(val queued: Int, val hasMore: Boolean, val eligible: Int)
 
 internal class MediaScanner(private val context: Context, private val database: UploadDatabase) {
   private val resolver: ContentResolver = context.contentResolver
 
-  fun scan(configuration: UploadConfiguration, limit: Int = 500): ScanResult {
-    val albumSignature = configuration.albumIds.sorted().joinToString("\u0000")
+  fun scan(limit: Int = 500): ScanResult {
+    val albumSignature = "dcim-camera"
     if (database.state("album_signature") != albumSignature) {
       database.setState("scan_date_added", "0")
       database.setState("scan_id", "0")
       database.setState("album_signature", albumSignature)
     }
+    val eligible = eligibleCount()
+    val page = scanFromCursor(limit)
+    if (!page.hasMore && database.queueCounts().total < eligible) {
+      // Android can expand a selected-photos grant to the full library without
+      // changing the album. Restart the cursor so older, newly visible media is
+      // discovered instead of waiting behind the previous partial grant.
+      database.setState("scan_date_added", "0")
+      database.setState("scan_id", "0")
+      val backfill = scanFromCursor(limit)
+      return ScanResult(page.queued + backfill.queued, backfill.hasMore, eligible)
+    }
+    return ScanResult(page.queued, page.hasMore, eligible)
+  }
+
+  private fun scanFromCursor(limit: Int): ScanResult {
     val dateAdded = database.state("scan_date_added")?.toLongOrNull() ?: 0L
     val lastId = database.state("scan_id")?.toLongOrNull() ?: 0L
     val contentUri = MediaStore.Files.getContentUri("external")
     val selectionParts = mutableListOf(
       "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?)",
       "${MediaStore.MediaColumns.SIZE} > 0",
+      cameraSelection(),
       "(${MediaStore.MediaColumns.DATE_ADDED} > ? OR (${MediaStore.MediaColumns.DATE_ADDED} = ? AND ${MediaStore.MediaColumns._ID} > ?))",
     )
     val arguments = mutableListOf(
       MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
       MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+      cameraSelectionArgument(),
       dateAdded.toString(),
       dateAdded.toString(),
       lastId.toString(),
     )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) selectionParts += "${MediaStore.MediaColumns.IS_PENDING} = 0"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) selectionParts += "${MediaStore.MediaColumns.IS_TRASHED} = 0"
-    if (configuration.albumIds.isNotEmpty()) {
-      selectionParts += "${MediaStore.Images.Media.BUCKET_ID} IN (${configuration.albumIds.joinToString(",") { "?" }})"
-      arguments += configuration.albumIds
-    }
 
     var queued = 0
     var visited = 0
@@ -71,7 +84,49 @@ internal class MediaScanner(private val context: Context, private val database: 
         visited += 1
       }
     }
-    return ScanResult(queued, visited == limit)
+    return ScanResult(queued, visited == limit, 0)
+  }
+
+  fun cameraBucketIds(): Set<String> {
+    val contentUri = MediaStore.Files.getContentUri("external")
+    val selection = listOf(
+      "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?)",
+      "${MediaStore.MediaColumns.SIZE} > 0",
+      cameraSelection(),
+    ).joinToString(" AND ")
+    val arguments = arrayOf(
+      MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+      MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+      cameraSelectionArgument(),
+    )
+    return buildSet {
+      resolver.query(contentUri, arrayOf(MediaStore.Images.Media.BUCKET_ID), selection, arguments, null)?.use { cursor ->
+        while (cursor.moveToNext()) cursor.optionalString(MediaStore.Images.Media.BUCKET_ID)?.let(::add)
+      }
+    }
+  }
+
+  fun eligibleCount(): Int {
+    val contentUri = MediaStore.Files.getContentUri("external")
+    val selectionParts = mutableListOf(
+      "(${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?)",
+      "${MediaStore.MediaColumns.SIZE} > 0",
+      cameraSelection(),
+    )
+    val arguments = mutableListOf(
+      MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+      MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+      cameraSelectionArgument(),
+    )
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) selectionParts += "${MediaStore.MediaColumns.IS_PENDING} = 0"
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) selectionParts += "${MediaStore.MediaColumns.IS_TRASHED} = 0"
+    return resolver.query(
+      contentUri,
+      arrayOf(MediaStore.MediaColumns._ID),
+      selectionParts.joinToString(" AND "),
+      arguments.toTypedArray(),
+      null,
+    )?.use { it.count } ?: 0
   }
 
   fun enqueueManual(json: String): Int {
@@ -111,6 +166,18 @@ internal class MediaScanner(private val context: Context, private val database: 
   private fun android.database.Cursor.optionalString(column: String): String? {
     val index = getColumnIndexOrThrow(column)
     return if (isNull(index)) null else getString(index)
+  }
+
+  private fun cameraSelection(): String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+  } else {
+    "${MediaStore.MediaColumns.DATA} LIKE ?"
+  }
+
+  private fun cameraSelectionArgument(): String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    "DCIM/Camera/"
+  } else {
+    "%/DCIM/Camera/%"
   }
 
   private companion object {

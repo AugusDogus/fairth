@@ -22,3 +22,7 @@ export async function syncCycle(settings: SyncSettings): Promise<string> {
 export async function uploadStatus(): Promise<BackgroundUploadStatus> {
   return BackgroundUpload.getStatus();
 }
+
+export async function checkUploadConnection(): Promise<boolean> {
+  return BackgroundUpload.checkConnection();
+}

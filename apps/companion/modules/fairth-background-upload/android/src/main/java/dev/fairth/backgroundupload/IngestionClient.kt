@@ -2,6 +2,8 @@ package dev.fairth.backgroundupload
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -20,15 +22,29 @@ internal data class UploadSession(
   val receivedChunks: Set<Int>,
 )
 
+internal data class EndpointChoice(
+  val endpoint: String?,
+  val error: String?,
+)
+
 internal class IngestionClient(private val resolver: ContentResolver) {
-  fun chooseEndpoint(configuration: UploadConfiguration): String? = configuration.endpoints().firstOrNull { endpoint ->
-    runCatching {
-      connection("$endpoint/health", "GET").run {
-        val reachable = responseCode in 200..299
-        disconnect()
-        reachable
+  fun chooseEndpoint(configuration: UploadConfiguration): EndpointChoice {
+    val failures = mutableListOf<String>()
+    for (endpoint in configuration.endpoints()) {
+      try {
+        val connection = connection("$endpoint/health", "GET")
+        try {
+          val status = connection.responseCode
+          if (status in 200..299) return EndpointChoice(endpoint, null)
+          failures += "HTTP $status"
+        } finally {
+          connection.disconnect()
+        }
+      } catch (failure: Exception) {
+        failures += failure.message?.takeIf { it.isNotBlank() } ?: failure.javaClass.simpleName
       }
-    }.getOrDefault(false)
+    }
+    return EndpointChoice(null, failures.joinToString("; ").ifBlank { "No ingestion endpoint is configured." })
   }
 
   fun upload(base: String, token: String, configuration: UploadConfiguration, record: UploadRecord, saveUploadId: (String) -> Unit) {
@@ -45,6 +61,10 @@ internal class IngestionClient(private val resolver: ContentResolver) {
       uploadChunk(base, token, session.uploadId, index, record.media.uri, offset, length)
     }
     request(base, token, "POST", "/v1/uploads/${session.uploadId}/complete", ByteArray(0))
+  }
+
+  fun heartbeat(base: String, token: String) {
+    request(base, token, "GET", "/v1/status")
   }
 
   private fun createSession(base: String, token: String, configuration: UploadConfiguration, media: MediaRecord): UploadSession {
@@ -75,7 +95,14 @@ internal class IngestionClient(private val resolver: ContentResolver) {
     connection.doOutput = true
     try {
       connection.outputStream.use { output ->
-        resolver.openFileDescriptor(Uri.parse(uri), "r")?.use { descriptor ->
+        val mediaUri = Uri.parse(uri).let { parsed ->
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && parsed.scheme == ContentResolver.SCHEME_CONTENT) {
+            MediaStore.setRequireOriginal(parsed)
+          } else {
+            parsed
+          }
+        }
+        resolver.openFileDescriptor(mediaUri, "r")?.use { descriptor ->
           FileInputStream(descriptor.fileDescriptor).use { input ->
             input.channel.position(offset)
             copyExactly(input, output, length)

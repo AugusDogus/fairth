@@ -11,8 +11,8 @@ export type SyncSettings = Readonly<{
 }>;
 
 export const defaultSettings: SyncSettings = {
-  primaryEndpoint: "",
-  lanEndpoint: "http://unraid.local:3000",
+  primaryEndpoint: "https://unraid.example-tailnet.ts.net:3443",
+  lanEndpoint: "",
   deviceId: "pixel",
   wifiOnly: true,
   chargingOnly: false,
