@@ -1,4 +1,7 @@
-import BackgroundUpload, { type BackgroundUploadStatus } from "../modules/fairth-background-upload";
+import BackgroundUpload, {
+  type BackgroundUploadEntry,
+  type BackgroundUploadStatus,
+} from "../modules/fairth-background-upload";
 import { getToken } from "./credentials";
 import type { SyncSettings } from "./types";
 
@@ -21,6 +24,14 @@ export async function syncCycle(settings: SyncSettings): Promise<string> {
 
 export async function uploadStatus(): Promise<BackgroundUploadStatus> {
   return BackgroundUpload.getStatus();
+}
+
+export async function uploadHistory(limit = 50, offset = 0): Promise<readonly BackgroundUploadEntry[]> {
+  return BackgroundUpload.getHistory(limit, offset);
+}
+
+export async function retryUpload(mediaKey: string): Promise<boolean> {
+  return BackgroundUpload.retryUpload(mediaKey);
 }
 
 export async function checkUploadConnection(): Promise<boolean> {

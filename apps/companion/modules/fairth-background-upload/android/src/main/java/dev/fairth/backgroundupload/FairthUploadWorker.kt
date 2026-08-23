@@ -66,8 +66,10 @@ internal class FairthUploadWorker(context: Context, parameters: WorkerParameters
         }
         try {
           client.upload(endpoint, token, configuration, record) { uploadId -> database.saveUploadId(record.media.mediaKey, uploadId) }
-          database.markUploaded(record.media.mediaKey)
-          SharedMediaStore(applicationContext).deleteIfManaged(record.media.uri)
+          val sharedMediaStore = SharedMediaStore(applicationContext)
+          val thumbnailUri = sharedMediaStore.preserveThumbnail(record.media)
+          database.markUploaded(record.media.mediaKey, thumbnailUri)
+          sharedMediaStore.deleteIfManaged(record.media.uri)
           uploaded += 1
         } catch (failure: UploadFailure) {
           val prefix = if (failure.authenticationFailed) "Authentication failed: " else "Upload failed: "

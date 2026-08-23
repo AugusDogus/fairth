@@ -55,6 +55,20 @@ class FairthBackgroundUploadModule : Module() {
       database.counts(MediaScanner(context, database).eligibleCount())
     }
 
+    AsyncFunction("getHistory") { limit: Int, offset: Int ->
+      val context = requireNotNull(appContext.reactContext) { "Android application context is unavailable." }
+      UploadConfiguration.load(context) ?: error("Save upload settings before reading upload history.")
+      UploadDatabaseProvider.get(context).history(limit, offset)
+    }
+
+    AsyncFunction("retryUpload") { mediaKey: String ->
+      val context = requireNotNull(appContext.reactContext) { "Android application context is unavailable." }
+      val configuration = UploadConfiguration.load(context) ?: error("Save upload settings before retrying an upload.")
+      val retried = UploadDatabaseProvider.get(context).retryNow(mediaKey)
+      if (retried) UploadScheduler.runQueuedNow(context, configuration)
+      retried
+    }
+
     AsyncFunction("checkConnection") {
       val context = requireNotNull(appContext.reactContext) { "Android application context is unavailable." }
       val configuration = UploadConfiguration.load(context) ?: error("Save upload settings before checking connectivity.")

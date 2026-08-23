@@ -10,6 +10,9 @@ class FairthBackgroundUploadModule extends NativeModule<{}> {
   async enqueueManualAssets(): Promise<number> { return this.unsupported(); }
   async enqueueSharedImages(): Promise<number> { return this.unsupported(); }
   async getStatus(): Promise<never> { return this.unsupported(); }
+  async getHistory(): Promise<never> { return this.unsupported(); }
+  async retryUpload(): Promise<boolean> { return this.unsupported(); }
+  async checkConnection(): Promise<boolean> { return this.unsupported(); }
 }
 
 export default registerWebModule(FairthBackgroundUploadModule, "FairthBackgroundUpload");

@@ -30,7 +30,7 @@ internal data class QueueCounts(
   val total: Int = pending + retry + uploaded
 }
 
-internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fairth-background-upload.sqlite", null, 1) {
+internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fairth-background-upload.sqlite", null, 2) {
   override fun onConfigure(database: SQLiteDatabase) {
     database.setForeignKeyConstraintsEnabled(true)
     database.enableWriteAheadLogging()
@@ -48,6 +48,7 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
         size INTEGER NOT NULL CHECK(size > 0),
         status TEXT NOT NULL CHECK(status IN ('pending', 'uploading', 'retry', 'uploaded')),
         upload_id TEXT,
+        thumbnail_uri TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         next_attempt_at INTEGER NOT NULL DEFAULT 0,
         last_error TEXT,
@@ -63,7 +64,9 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     recoverInterruptedUploads(database)
   }
 
-  override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+  override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+    if (oldVersion < 2) database.execSQL("ALTER TABLE upload_queue ADD COLUMN thumbnail_uri TEXT")
+  }
 
   fun enqueue(record: MediaRecord): Boolean {
     val values = ContentValues().apply {
@@ -113,8 +116,9 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     put("updated_at", System.currentTimeMillis())
   })
 
-  fun markUploaded(mediaKey: String) = update(mediaKey, ContentValues().apply {
+  fun markUploaded(mediaKey: String, thumbnailUri: String?) = update(mediaKey, ContentValues().apply {
     put("status", "uploaded")
+    if (thumbnailUri != null) put("thumbnail_uri", thumbnailUri)
     putNull("last_error")
     put("updated_at", System.currentTimeMillis())
   })
@@ -131,6 +135,50 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
     writableDatabase.execSQL(
       "UPDATE upload_queue SET status = 'retry', next_attempt_at = 0, last_error = NULL WHERE status = 'retry' AND last_error LIKE 'Authentication failed:%'",
     )
+  }
+
+  fun history(limit: Int, offset: Int): List<Map<String, Any?>> {
+    val entries = mutableListOf<Map<String, Any?>>()
+    readableDatabase.query(
+      "upload_queue",
+      arrayOf("media_key", "uri", "thumbnail_uri", "filename", "status", "captured_at", "updated_at", "next_attempt_at", "last_error", "attempts"),
+      null,
+      null,
+      null,
+      null,
+      "CASE status WHEN 'retry' THEN 0 WHEN 'uploading' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, updated_at DESC",
+      "${limit.coerceIn(1, MAX_HISTORY_PAGE_SIZE)} OFFSET ${offset.coerceAtLeast(0)}",
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        entries += mapOf(
+          "id" to cursor.string("media_key"),
+          "uri" to (cursor.optionalString("thumbnail_uri") ?: cursor.string("uri")),
+          "filename" to cursor.string("filename"),
+          "status" to cursor.string("status"),
+          "capturedAt" to cursor.long("captured_at"),
+          "updatedAt" to cursor.long("updated_at"),
+          "nextAttemptAt" to cursor.long("next_attempt_at"),
+          "lastError" to cursor.optionalString("last_error"),
+          "attempts" to cursor.int("attempts"),
+        )
+      }
+    }
+    return entries
+  }
+
+  fun retryNow(mediaKey: String): Boolean {
+    val values = ContentValues().apply {
+      put("status", "pending")
+      put("next_attempt_at", 0)
+      putNull("last_error")
+      put("updated_at", System.currentTimeMillis())
+    }
+    return writableDatabase.update(
+      "upload_queue",
+      values,
+      "media_key = ? AND status = 'retry'",
+      arrayOf(mediaKey),
+    ) == 1
   }
 
   fun recoverInterruptedUploads() = recoverInterruptedUploads(writableDatabase)
@@ -228,6 +276,7 @@ internal class UploadDatabase(context: Context) : SQLiteOpenHelper(context, "fai
   private fun Cursor.int(column: String): Int = getInt(getColumnIndexOrThrow(column))
 
   private companion object {
+    const val MAX_HISTORY_PAGE_SIZE = 100
     const val SHARED_BUCKET = "shared"
     const val STALE_UPLOAD_MS = 60L * 60L * 1_000L
   }

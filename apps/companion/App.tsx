@@ -18,6 +18,7 @@ import {
   SafeAreaView,
 } from "react-native-safe-area-context";
 import * as MediaLibrary from "expo-media-library/legacy";
+import type { BackgroundUploadEntry } from "./modules/fairth-background-upload";
 import { getToken, saveToken } from "./src/credentials";
 import { initializeDatabase, loadSettings, saveSettings } from "./src/database";
 import {
@@ -41,9 +42,10 @@ import {
   type ConnectionState,
   type UploadCounts,
 } from "./src/screens";
-import { checkUploadConnection, configureBackgroundSync, syncCycle, uploadStatus } from "./src/sync";
+import { checkUploadConnection, configureBackgroundSync, retryUpload, syncCycle, uploadHistory, uploadStatus } from "./src/sync";
 import type { SyncSettings } from "./src/types";
 import { defaultSettings } from "./src/types";
+import { UploadHistoryScreen } from "./src/upload-history-screen";
 
 type AppScreen =
   | Readonly<{ kind: "loading" }>
@@ -59,6 +61,41 @@ type AppScreen =
       counts: UploadCounts;
       notice: string | null;
     }>;
+
+type HistoryRetryState =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{ kind: "running"; id: string }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+type HistoryPaginationState =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{ kind: "loading" }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+type HistoryView =
+  | Readonly<{ kind: "closed" }>
+  | Readonly<{ kind: "loading" }>
+  | Readonly<{ kind: "load-error"; message: string }>
+  | Readonly<{
+      kind: "ready";
+      entries: readonly BackgroundUploadEntry[];
+      hasMore: boolean;
+      pagination: HistoryPaginationState;
+      retry: HistoryRetryState;
+    }>;
+
+const HISTORY_PAGE_SIZE = 50;
+
+async function loadHistoryPage(offset: number): Promise<Readonly<{
+  entries: readonly BackgroundUploadEntry[];
+  hasMore: boolean;
+}>> {
+  const page = await uploadHistory(HISTORY_PAGE_SIZE + 1, offset);
+  return {
+    entries: page.slice(0, HISTORY_PAGE_SIZE),
+    hasMore: page.length > HISTORY_PAGE_SIZE,
+  };
+}
 
 function message(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
@@ -121,7 +158,10 @@ function CompanionApp() {
   const [pendingPairingUri, setPendingPairingUri] = useState<string | null>(null);
   const [settings, setSettings] = useState<SyncSettings>(defaultSettings);
   const [screen, setScreen] = useState<AppScreen>({ kind: "loading" });
+  const [historyView, setHistoryView] = useState<HistoryView>({ kind: "closed" });
+  const historyPageLoading = useRef(false);
   const pairingAttempt = useRef(0);
+  const showingHistory = historyView.kind !== "closed";
 
   useEffect(() => {
     let active = true;
@@ -235,6 +275,22 @@ function CompanionApp() {
       clearInterval(connectionTimer);
     };
   }, [screen.kind, settings]);
+
+  useEffect(() => {
+    if (!showingHistory) return undefined;
+    const closeHistory = (): boolean => {
+      setHistoryView({ kind: "closed" });
+      return true;
+    };
+    const subscription = BackHandler.addEventListener("hardwareBackPress", closeHistory);
+    return () => subscription.remove();
+  }, [showingHistory]);
+
+  useEffect(() => {
+    if (!showingHistory) return undefined;
+    void refreshHistory();
+    return undefined;
+  }, [showingHistory]);
 
   useEffect(() => {
     if (!settings.automaticSync || screen.kind !== "home") return undefined;
@@ -424,6 +480,71 @@ function CompanionApp() {
     }
   }
 
+  async function refreshHistory(): Promise<void> {
+    try {
+      const page = await loadHistoryPage(0);
+      setHistoryView((current) => {
+        if (current.kind === "closed") return current;
+        const retry = current.kind === "ready" ? current.retry : { kind: "idle" } as const;
+        return { kind: "ready", entries: page.entries, hasMore: page.hasMore, pagination: { kind: "idle" }, retry };
+      });
+    } catch (error) {
+      setHistoryView((current) => current.kind === "loading"
+        ? { kind: "load-error", message: message(error, "Fairth could not read the upload queue. Try again.") }
+        : current);
+    }
+  }
+
+  async function loadMoreHistory(): Promise<void> {
+    if (historyView.kind !== "ready" || !historyView.hasMore || historyPageLoading.current) return;
+    historyPageLoading.current = true;
+    const offset = historyView.entries.length;
+    setHistoryView({ ...historyView, pagination: { kind: "loading" } });
+    try {
+      const page = await loadHistoryPage(offset);
+      setHistoryView((current) => {
+        if (current.kind !== "ready" || current.entries.length !== offset) return current;
+        const knownIds = new Set(current.entries.map((entry) => entry.id));
+        const additions = page.entries.filter((entry) => !knownIds.has(entry.id));
+        return {
+          ...current,
+          entries: [...current.entries, ...additions],
+          hasMore: page.hasMore,
+          pagination: { kind: "idle" },
+        };
+      });
+    } catch (error) {
+      setHistoryView((current) => current.kind === "ready"
+        ? { ...current, pagination: { kind: "failed", message: message(error, "Fairth could not load more uploads. Try again.") } }
+        : current);
+    } finally {
+      historyPageLoading.current = false;
+    }
+  }
+
+  async function retryHistoryUpload(id: string): Promise<void> {
+    if (historyView.kind !== "ready") return;
+    setHistoryView({ ...historyView, retry: { kind: "running", id } });
+    try {
+      const accepted = await retryUpload(id);
+      if (!accepted) throw new Error("That upload is no longer waiting for a retry. The list has been refreshed.");
+      const page = await loadHistoryPage(0);
+      setHistoryView((current) => current.kind === "closed"
+        ? current
+        : {
+            kind: "ready",
+            entries: page.entries,
+            hasMore: page.hasMore,
+            pagination: { kind: "idle" },
+            retry: { kind: "idle" },
+          });
+    } catch (error) {
+      setHistoryView((current) => current.kind === "ready"
+        ? { ...current, retry: { kind: "failed", message: message(error, "Fairth could not retry that upload. Try again.") } }
+        : current);
+    }
+  }
+
   if (screen.kind === "loading") return <AppFrame><LoadingScreen /></AppFrame>;
   if (screen.kind === "connect") {
     return (
@@ -477,6 +598,31 @@ function CompanionApp() {
       </AppFrame>
     );
   }
+  if (historyView.kind !== "closed") {
+    const entries = historyView.kind === "ready" ? historyView.entries : [];
+    const pagination = historyView.kind === "ready" ? historyView.pagination : { kind: "idle" } as const;
+    const retry = historyView.kind === "ready" ? historyView.retry : { kind: "idle" } as const;
+    return (
+      <AppFrame>
+        <UploadHistoryScreen
+          actionError={retry.kind === "failed" ? retry.message : null}
+          entries={entries}
+          loadError={historyView.kind === "load-error" ? historyView.message : null}
+          loadMoreError={pagination.kind === "failed" ? pagination.message : null}
+          loading={historyView.kind === "loading"}
+          loadingMore={pagination.kind === "loading"}
+          onBack={() => setHistoryView({ kind: "closed" })}
+          onReload={() => {
+            setHistoryView({ kind: "loading" });
+            void refreshHistory();
+          }}
+          onLoadMore={() => void loadMoreHistory()}
+          onRetry={(id) => void retryHistoryUpload(id)}
+          retryingId={retry.kind === "running" ? retry.id : null}
+        />
+      </AppFrame>
+    );
+  }
   return (
     <AppFrame>
       <HomeScreen
@@ -484,6 +630,7 @@ function CompanionApp() {
         counts={screen.counts}
         notice={screen.notice}
         onChangeMobileData={(enabled) => void changeHomeMobileData(enabled)}
+        onOpenHistory={() => setHistoryView({ kind: "loading" })}
         useMobileData={!settings.wifiOnly}
       />
     </AppFrame>

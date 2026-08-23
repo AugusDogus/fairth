@@ -35,7 +35,7 @@ type ButtonProps = Readonly<{
 
 type ErrorMessageProps = Readonly<{ message: string | null }>;
 
-const color = {
+export const appColor = {
   background: "#F4F6FA",
   surface: "#FFFFFF",
   ink: "#101828",
@@ -54,6 +54,8 @@ const color = {
   errorSoft: "#FEF3F2",
   white: "#FFFFFF",
 } as const;
+
+const color = appColor;
 
 function FairthMark({ inverse = false }: Readonly<{ inverse?: boolean }>) {
   return (
@@ -375,6 +377,7 @@ export type HomeScreenProps = Readonly<{
   counts: UploadCounts;
   notice: string | null;
   onChangeMobileData: (enabled: boolean) => void;
+  onOpenHistory: () => void;
   useMobileData: boolean;
 }>;
 
@@ -450,6 +453,24 @@ function MobileDataMark() {
   );
 }
 
+function HistoryMark() {
+  return (
+    <View style={styles.sourceIcon}>
+      <Svg height={24} viewBox="0 0 24 24" width={24}>
+        <Path d="M7 7h10M7 12h7M7 17h5" fill="none" stroke={color.primary} strokeLinecap="round" strokeWidth={2} />
+      </Svg>
+    </View>
+  );
+}
+
+function ChevronRight() {
+  return (
+    <Svg height={20} viewBox="0 0 24 24" width={20}>
+      <Path d="m9 6 6 6-6 6" fill="none" stroke={color.muted} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
+    </Svg>
+  );
+}
+
 function StateMark({ kind, large = false }: Readonly<{ kind: "active" | "complete" | "warning"; large?: boolean }>) {
   const warning = kind === "warning";
   const active = kind === "active";
@@ -480,6 +501,7 @@ export function HomeScreen({
   counts,
   notice,
   onChangeMobileData,
+  onOpenHistory,
   useMobileData,
 }: HomeScreenProps) {
   const waiting = counts.pending + counts.retry;
@@ -530,6 +552,13 @@ export function HomeScreen({
     : remaining === 0
       ? `${uploaded.toLocaleString()} backed up`
       : `${remaining.toLocaleString()} ${remaining === 1 ? "item" : "items"} left`;
+  const activitySummary = counts.retry > 0
+    ? `${counts.retry.toLocaleString()} need attention`
+    : waiting > 0
+      ? `${waiting.toLocaleString()} in progress`
+      : counts.uploaded > 0
+        ? "No issues"
+        : "No uploads yet";
 
   return (
     <ScreenShell>
@@ -594,6 +623,20 @@ export function HomeScreen({
               <ProgressTrack current={photos.completed} label={`Google Photos: ${photos.completed} of ${photos.total}`} total={photos.total} />
             </View>
           ) : null}
+          <View style={styles.rowDivider} />
+          <Pressable
+            accessibilityHint="Shows recent upload results and retryable failures"
+            accessibilityRole="button"
+            onPress={onOpenHistory}
+            style={({ pressed }) => [styles.statusRow, pressed ? styles.statusRowPressed : undefined]}
+          >
+            <HistoryMark />
+            <View style={styles.flexOne}>
+              <Text style={styles.rowTitle}>Recent uploads</Text>
+              <Text style={[styles.rowBody, counts.retry > 0 ? styles.rowBodyWarning : undefined]}>{activitySummary}</Text>
+            </View>
+            <ChevronRight />
+          </Pressable>
         </View>
       </View>
 
@@ -702,6 +745,7 @@ const styles = StyleSheet.create({
   stateMarkWarning: { backgroundColor: color.errorSoft },
   statusList: { borderBottomColor: color.borderSoft, borderBottomWidth: StyleSheet.hairlineWidth, borderTopColor: color.borderSoft, borderTopWidth: StyleSheet.hairlineWidth },
   statusRow: { alignItems: "center", flexDirection: "row", gap: 14, minHeight: 76, paddingVertical: 14 },
+  statusRowPressed: { backgroundColor: color.primarySoft },
   stageProgressFill: { backgroundColor: color.primary, borderRadius: 99 },
   stageProgressTrack: { backgroundColor: color.primarySoft, borderRadius: 99, flexDirection: "row", height: 6, overflow: "hidden" },
   step: { backgroundColor: color.border, borderRadius: 99, height: 5, width: 22 },
