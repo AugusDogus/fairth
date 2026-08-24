@@ -42,6 +42,17 @@ configure_pixelmask() {
   pixelmask_package='com.kinginu.pixelmask'
   photos_package='com.google.android.apps.photos'
   lsposed_database='/data/adb/lspd/config/modules_config.db'
+  activation_marker="${state_directory}/pixelmask-active"
+
+  verify_pixelmask_active() {
+    pixelmask_window='/sdcard/fairth-pixelmask-window.xml'
+    adb -s "${adb_endpoint}" shell am force-stop "${pixelmask_package}" >/dev/null 2>&1 || true
+    adb -s "${adb_endpoint}" shell am start -W -n "${pixelmask_package}/.MainActivity" >/dev/null 2>&1 || return 1
+    sleep 1
+    hierarchy="$(adb -s "${adb_endpoint}" shell "rm -f ${pixelmask_window}; uiautomator dump ${pixelmask_window} >/dev/null && cat ${pixelmask_window}" 2>/dev/null | tr -d '\r')"
+    adb -s "${adb_endpoint}" shell am force-stop "${pixelmask_package}" >/dev/null 2>&1 || true
+    printf '%s' "${hierarchy}" | grep -q 'text="Module Active"'
+  }
 
   pixelmask_path="$(adb -s "${adb_endpoint}" shell pm path "${pixelmask_package}" 2>/dev/null | tr -d '\r' | sed -n '1s/^package://p')"
   if test -z "${pixelmask_path}"; then return; fi
@@ -69,8 +80,14 @@ configure_pixelmask() {
 
   current_scope="$(root_shell "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
   if test "${current_scope}" = '1:2'; then
-    printf '%s\n' 'PixelMask is enabled for Google Photos in LSPosed.'
-    return
+    if verify_pixelmask_active; then
+      printf '%s\n' 'PixelMask is active and enabled for Google Photos in LSPosed.'
+      date -u +'%Y-%m-%dT%H:%M:%SZ' >"${activation_marker}"
+      return
+    fi
+    rm -f "${activation_marker}"
+    printf '%s\n' 'Android container recreation is required to activate PixelMask.'
+    exit 75
   fi
 
   printf '%s\n' 'Enabling PixelMask for Google Photos in LSPosed.'
@@ -83,6 +100,9 @@ configure_pixelmask() {
   adb -s "${adb_endpoint}" shell am force-stop "${photos_package}" >/dev/null 2>&1 || true
   verified_scope="$(root_shell "sqlite3 ${lsposed_database} \"SELECT m.enabled || ':' || COUNT(s.app_pkg_name) FROM modules m LEFT JOIN scope s ON s.mid=m.mid AND s.user_id=0 AND s.app_pkg_name IN ('${pixelmask_package}','${photos_package}') WHERE m.module_pkg_name='${pixelmask_package}' GROUP BY m.mid;\"" 2>/dev/null | tr -d '\r')"
   test "${verified_scope}" = '1:2'
+  rm -f "${activation_marker}"
+  printf '%s\n' 'Android container recreation is required to activate PixelMask.'
+  exit 75
 }
 
 provision_artifacts() {

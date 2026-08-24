@@ -116,7 +116,6 @@ if [[ ! -f "${magisk_util_functions}" ]]; then
 fi
 mkdir -p "${photos_overlay}/system/etc/init/magisk"
 cp "${magisk_util_functions}" "${photos_overlay}/system/etc/init/magisk/util_functions.sh"
-cp "${project_directory}/deployment/android/lmkd.rc" "${photos_overlay}/system/etc/init/lmkd.rc"
 cp "${project_directory}/deployment/android/fairth-network" \
   "${photos_overlay}/system/bin/fairth-network"
 chmod 0755 "${photos_overlay}/system/bin/fairth-network"

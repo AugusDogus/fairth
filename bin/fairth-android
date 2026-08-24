@@ -73,6 +73,10 @@ check_host() {
     printf '%s\n' 'Android Binder support was not found. Configure binder_linux on the Unraid host.' >&2
     return 1
   fi
+  if [[ ! -r /proc/pressure/memory ]]; then
+    printf '%s\n' 'Pressure stall information is unavailable. Add psi=1 to the Unraid boot arguments, then reboot.' >&2
+    return 1
+  fi
   if ! "${runtime}" image inspect "${appliance_image}" >/dev/null 2>&1; then
     printf 'Fairth image is missing: %s. Run bin/fairth-android build-image.\n' "${appliance_image}" >&2
     return 1
@@ -105,6 +109,7 @@ start_appliance() {
   local boot_attempt
   local existing_name
   local provisioning_status
+  local provisioning_attempt
   local -a android_arguments
   local -a fairth_arguments
   local -a provisioning_arguments
@@ -122,7 +127,7 @@ start_appliance() {
   incoming_path="$(env_value INCOMING_PATH fairth-incoming)"
   web_bind="$(env_value WEB_BIND_ADDRESS 0.0.0.0)"
   web_port="$(env_value WEB_PORT 3000)"
-  viewer_bind="$(env_value ANDROID_VIEWER_BIND_ADDRESS 0.0.0.0)"
+  viewer_bind="$(env_value ANDROID_VIEWER_BIND_ADDRESS 127.0.0.1)"
   viewer_port="$(env_value ANDROID_VIEWER_PORT 6080)"
   width="$(env_value ANDROID_WIDTH 1080)"
   height="$(env_value ANDROID_HEIGHT 2400)"
@@ -164,8 +169,8 @@ start_appliance() {
     --network-alias android
     # ADB stays on the bridge gateway because Android can reject direct peer traffic.
     --publish "${network_gateway}:5555:5555"
-    # Docker's volume filesystem supplies xattrs missing from some Unraid /dev tmpfs builds.
-    --mount type=volume,destination=/dev/__properties__,volume-nocopy
+    # Android property files are boot-scoped shared memory and must start empty.
+    --tmpfs /dev/__properties__
     --volume "${android_data_path}:/data"
     "${redroid_image}"
     androidboot.hardware=redroid
@@ -175,8 +180,7 @@ start_appliance() {
     "androidboot.redroid_dpi=${dpi}"
     "androidboot.redroid_fps=${fps}"
     androidboot.use_memfd=true
-    ro.lmk.use_psi=false
-    ro.lmk.use_minfree_levels=true
+    ro.lmk.use_psi=true
     # Stock Unraid kernels omit tmpfs xattrs, which Android 11 data isolation requires.
     persist.zygote.app_data_isolation=false
     ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a
@@ -228,15 +232,21 @@ start_appliance() {
     "${appliance_image}"
   )
 
-  provisioning_status=0
-  "${runtime}" "${provisioning_arguments[@]}" || provisioning_status=$?
-  if [[ "${provisioning_status}" -eq 75 ]]; then
-    printf '%s\n' 'Recreating Android once to activate its installed modules.'
-    "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null
-    start_android_container
+  provisioning_attempt=0
+  while true; do
     provisioning_status=0
     "${runtime}" "${provisioning_arguments[@]}" || provisioning_status=$?
-  fi
+    if [[ "${provisioning_status}" -ne 75 ]]; then break; fi
+    provisioning_attempt=$((provisioning_attempt + 1))
+    if [[ "${provisioning_attempt}" -gt 3 ]]; then
+      printf '%s\n' 'Android provisioning requested too many container recreations.' >&2
+      provisioning_status=1
+      break
+    fi
+    printf 'Recreating Android to activate provisioning changes (attempt %s of 3).\n' "${provisioning_attempt}"
+    "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null
+    start_android_container
+  done
   if [[ "${provisioning_status}" -ne 0 ]]; then
     printf 'Automatic Android provisioning failed with status %s. Android data was preserved.\n' "${provisioning_status}" >&2
     "${runtime}" rm --force --volumes "${android_container_name}" >/dev/null 2>&1 || true
