@@ -4,7 +4,7 @@ import { OwnerShell } from "@/components/owner-shell";
 
 export default function DeviceApprovedPage() {
   return (
-    <OwnerShell eyebrow="Companion enrollment" title="Device approved" description="The companion can now finish enrollment and begin its background upload schedule.">
+    <OwnerShell title="Device approved" description="The companion can now finish enrollment and begin its background upload schedule.">
       <div className="space-y-5">
         <div className="flex items-center gap-3 rounded-xl border bg-muted/40 p-4">
           <CheckCircle2Icon className="size-5 text-primary" aria-hidden="true" />

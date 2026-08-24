@@ -18,7 +18,7 @@ export default async function DevicesPage({ searchParams }: DevicesPageProps) {
   const sessions = await authService.auth.api.listSessions({ headers: requestHeaders });
 
   return (
-    <OwnerShell eyebrow="Access control" title="Authorized devices" description="Revoking a session immediately stops that companion from starting or resuming uploads.">
+    <OwnerShell title="Authorized devices" description="Revoking a session immediately stops that companion from starting or resuming uploads.">
       <div className="space-y-4">
         <OwnerError message={error} />
         <div className="space-y-2">

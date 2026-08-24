@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
+import type { ImportProgress } from "@fairth/android-rpc";
 
 export type ImportRecord = Readonly<{
   hash: string;
@@ -81,13 +82,19 @@ export function createImportDatabase(dataDirectory: string) {
     failure(hash: string, message: string, nextAttemptAt: number): void {
       failureStatement.run(nextAttemptAt, message, new Date().toISOString(), hash);
     },
-    counts(): Readonly<Record<string, number>> {
+    counts(): ImportProgress {
       const rows = database.prepare("SELECT status, COUNT(*) AS count FROM imports GROUP BY status").all();
-      const counts: Record<string, number> = {};
+      const counts: ImportProgress = { pending: 0, imported: 0, failed: 0, duplicate: 0 };
       for (const value of rows) {
         if (typeof value !== "object" || value === null) continue;
         const row = Object.fromEntries(Object.entries(value));
-        if (typeof row.status === "string" && typeof row.count === "number") counts[row.status] = row.count;
+        if (typeof row.count !== "number") continue;
+        switch (row.status) {
+          case "pending": counts.pending = row.count; break;
+          case "imported": counts.imported = row.count; break;
+          case "failed": counts.failed = row.count; break;
+          case "duplicate": counts.duplicate = row.count; break;
+        }
       }
       return counts;
     },

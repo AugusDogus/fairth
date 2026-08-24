@@ -20,7 +20,7 @@ export default async function DevicePage({ searchParams }: DevicePageProps) {
 
   if (userCode.length === 0) {
     return (
-      <OwnerShell eyebrow="Companion enrollment" title="Enter the device code" description="Type the eight-character code shown by the Fairth companion app.">
+      <OwnerShell title="Enter the device code" description="Type the eight-character code shown by the Fairth companion app.">
         <form method="get">
           <FieldGroup>
             <Field>
@@ -44,7 +44,7 @@ export default async function DevicePage({ searchParams }: DevicePageProps) {
   }
 
   return (
-    <OwnerShell eyebrow="Companion enrollment" title="Approve this device?" description="Approval creates a revocable session that can upload media, but cannot manage the appliance.">
+    <OwnerShell title="Approve this device?" description="Approval creates a revocable session that can upload media, but cannot manage the appliance.">
       <div className="space-y-5">
         <OwnerError message={verificationError} />
         {clientId === undefined ? null : (

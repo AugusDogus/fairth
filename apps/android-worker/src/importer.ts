@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import type { ReturnTypeAdb } from "./types.js";
 import type { Config } from "./config.js";
 import type { ImportDatabase } from "./database.js";
+import { readImportMetadata } from "./manifest.js";
 import { createStableScanner, sha256 } from "./scanner.js";
 
 export type ImporterState = {
@@ -12,11 +13,6 @@ export type ImporterState = {
   lastSuccessAt?: string;
   lastError?: string;
 };
-
-function remoteFilename(filename: string, hash: string): string {
-  const safe = basename(filename).normalize("NFKC").replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+/, "").slice(-160);
-  return `${hash.slice(0, 12)}-${safe.length > 0 ? safe : "media.bin"}`;
-}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -40,7 +36,7 @@ function retryDelay(attempts: number): number {
   return Math.min(60 * 60_000, 5_000 * (2 ** Math.min(attempts, 9)));
 }
 
-export function createImporter(config: Config, database: ImportDatabase, adb: ReturnTypeAdb, state: ImporterState) {
+export function createImporter(config: Config, database: ImportDatabase, adb: Pick<ReturnTypeAdb, "importMedia">, state: ImporterState) {
   const scanner = createStableScanner(config);
 
   async function cycle(): Promise<void> {
@@ -61,10 +57,19 @@ export function createImporter(config: Config, database: ImportDatabase, adb: Re
         if (existing !== undefined && existing.attempts >= config.maxRetries) continue;
         if (existing !== undefined && existing.nextAttemptAt > Date.now()) continue;
 
-        const filename = remoteFilename(candidate.path, hash);
+        const metadata = await readImportMetadata(candidate.path, hash, candidate.mtimeMs);
+        if (!metadata.ok) {
+          const filename = basename(candidate.path);
+          database.begin(hash, candidate.path, filename);
+          database.failure(hash, metadata.message, Date.now() + retryDelay(database.find(hash)?.attempts ?? 1));
+          state.lastError = metadata.message;
+          console.error(JSON.stringify({ level: "error", event: "manifest_invalid", path: candidate.path, hash, message: metadata.message }));
+          continue;
+        }
+        const filename = metadata.value.remoteFilename;
         database.begin(hash, candidate.path, filename);
         const attempt = (database.find(hash)?.attempts ?? 1);
-        const result = await adb.importMedia(candidate.path, filename);
+        const result = await adb.importMedia(candidate.path, filename, metadata.value.capturedAtMs, hash);
         if (result.ok) {
           database.success(hash);
           await archive(config, candidate.path);

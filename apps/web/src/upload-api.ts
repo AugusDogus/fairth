@@ -1,7 +1,10 @@
 import { Readable } from "node:stream";
+import type { AndroidPipelineProgress } from "@fairth/android-rpc";
 import type { AuthService } from "./auth";
+import { createAndroidWorkerClient } from "./android-worker-client";
 import type { Config } from "./config";
 import { parseSessionRequest, safeFilename, type UploadMetadata } from "./domain";
+import { createCompanionPresence, type CompanionPresence } from "./presence";
 import { StorageError, type UploadStorage } from "./storage";
 
 const jsonBodyLimit = 64 * 1024;
@@ -112,10 +115,19 @@ function errorResponse(error: unknown): Response {
   return json({ error: "internal", message: "The upload could not be processed. Existing completed media remains intact; retry the request." }, 500);
 }
 
-export function createUploadApi(config: Config, storage: UploadStorage, authService: AuthService) {
+export function createUploadApi(
+  config: Config,
+  storage: UploadStorage,
+  authService: AuthService,
+  readPipelineProgress: () => Promise<AndroidPipelineProgress> = () => createAndroidWorkerClient(config).progress.query(),
+  companionPresence: CompanionPresence = createCompanionPresence(config.authDataRoot),
+) {
   async function run(request: Request, operation: () => Promise<Response>): Promise<Response> {
     const session = await authService.auth.api.getSession({ headers: request.headers });
     if (session === null) return json({ error: "unauthorized", message: "Supply a valid enrolled-device Bearer session." }, 401);
+    if (session.session.userAgent?.startsWith("Fairth Companion/") === true) {
+      await companionPresence.touch(session.session.token);
+    }
     try {
       return await operation();
     } catch (error) {
@@ -124,6 +136,7 @@ export function createUploadApi(config: Config, storage: UploadStorage, authServ
   }
 
   return {
+    status: (request: Request) => run(request, async () => json(await readPipelineProgress())),
     direct: (request: Request) => run(request, async () => {
       const filename = optionalHeader(request, "x-file-name", 255);
       if (filename === undefined) throw new StorageError("invalid", "x-file-name is required and must not exceed 255 characters.");

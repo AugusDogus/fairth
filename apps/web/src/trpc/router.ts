@@ -21,7 +21,7 @@ export const webRpcRouter = t.router({
   android: t.router({
     status: ownerProcedure.query(({ ctx }) => createAndroidWorkerClient(ctx.config).status.query()),
     openGoogleAccount: ownerProcedure.mutation(({ ctx }) => createAndroidWorkerClient(ctx.config).openGoogleAccount.mutate()),
-    openPhotos: ownerProcedure.mutation(({ ctx }) => createAndroidWorkerClient(ctx.config).openPhotos.mutate()),
+    configurePhotos: ownerProcedure.mutation(({ ctx }) => createAndroidWorkerClient(ctx.config).configurePhotos.mutate()),
     reconcileProvisioning: ownerProcedure.mutation(({ ctx }) => createAndroidWorkerClient(ctx.config).reconcileProvisioning.mutate()),
   }),
 });

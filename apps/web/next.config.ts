@@ -11,6 +11,10 @@ const ownerHeaders = [
   { key: "x-frame-options", value: "DENY" },
 ];
 
+const onboardingHeaders = ownerHeaders.map((header) => header.key === "content-security-policy"
+  ? { ...header, value: `${header.value}; frame-src 'self' http: https:` }
+  : header);
+
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: workspaceRoot,
@@ -20,7 +24,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/setup", headers: ownerHeaders },
       { source: "/login", headers: ownerHeaders },
-      { source: "/onboarding", headers: ownerHeaders },
+      { source: "/onboarding", headers: onboardingHeaders },
       { source: "/devices", headers: ownerHeaders },
       { source: "/device-approved", headers: ownerHeaders },
       { source: "/device", headers: ownerHeaders },

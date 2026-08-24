@@ -1,7 +1,7 @@
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 
-export const AndroidActionSchema = z.enum(["open_google_account", "open_photos"]);
+export const AndroidActionSchema = z.enum(["open_google_account", "configure_photos"]);
 export type AndroidAction = z.infer<typeof AndroidActionSchema>;
 
 const stepBase = z.object({
@@ -30,11 +30,40 @@ export const AndroidOperationResultSchema = z.discriminatedUnion("ok", [
 ]);
 export type AndroidOperationResult = z.infer<typeof AndroidOperationResultSchema>;
 
+export const GooglePhotosProgressSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("needs_setup"), detail: z.string() }),
+  z.object({ state: z.literal("idle"), detail: z.string() }),
+  z.object({
+    state: z.literal("uploading"),
+    detail: z.string(),
+    completed: z.number().int().nonnegative().optional(),
+    total: z.number().int().nonnegative().optional(),
+    remaining: z.number().int().nonnegative().optional(),
+  }),
+  z.object({ state: z.literal("blocked"), detail: z.string() }),
+]);
+export type GooglePhotosProgress = z.infer<typeof GooglePhotosProgressSchema>;
+
+export const ImportProgressSchema = z.object({
+  pending: z.number().int().nonnegative(),
+  imported: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+});
+export type ImportProgress = z.infer<typeof ImportProgressSchema>;
+
+export const AndroidPipelineProgressSchema = z.object({
+  imports: ImportProgressSchema,
+  googlePhotos: GooglePhotosProgressSchema,
+});
+export type AndroidPipelineProgress = z.infer<typeof AndroidPipelineProgressSchema>;
+
 export type AndroidController = Readonly<{
   onboarding: () => Promise<AndroidOnboarding>;
   openGoogleAccount: () => Promise<AndroidOperationResult>;
-  openPhotos: () => Promise<AndroidOperationResult>;
+  configurePhotos: () => Promise<AndroidOperationResult>;
   reconcileProvisioning: () => Promise<AndroidOperationResult>;
+  progress: () => Promise<AndroidPipelineProgress>;
 }>;
 
 export type AndroidRpcContext = Readonly<{ android: AndroidController }>;
@@ -44,8 +73,9 @@ const t = initTRPC.context<AndroidRpcContext>().create();
 export const androidRpcRouter = t.router({
   status: t.procedure.output(AndroidOnboardingSchema).query(({ ctx }) => ctx.android.onboarding()),
   openGoogleAccount: t.procedure.output(AndroidOperationResultSchema).mutation(({ ctx }) => ctx.android.openGoogleAccount()),
-  openPhotos: t.procedure.output(AndroidOperationResultSchema).mutation(({ ctx }) => ctx.android.openPhotos()),
+  configurePhotos: t.procedure.output(AndroidOperationResultSchema).mutation(({ ctx }) => ctx.android.configurePhotos()),
   reconcileProvisioning: t.procedure.output(AndroidOperationResultSchema).mutation(({ ctx }) => ctx.android.reconcileProvisioning()),
+  progress: t.procedure.output(AndroidPipelineProgressSchema).query(({ ctx }) => ctx.android.progress()),
 });
 
 export type AndroidRpcRouter = typeof androidRpcRouter;

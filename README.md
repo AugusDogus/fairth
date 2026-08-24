@@ -23,24 +23,24 @@ Fairth deploys as two containers on a private Docker network. The non-privileged
 - MediaStore verification after every ADB import
 - Health details for Android boot, ADB, Google Photos, queue state, and worker state
 - Expo SDK 57 app with MediaLibrary selection and a local Kotlin module for native scanning, queueing, LAN-first uploads, and WorkManager scheduling
-- Owner-only onboarding status in the Next.js app, with a private browser-based Android viewer for Google consent
+- Owner-only onboarding status in the Next.js app, with an embedded private Android viewer for Google sign-in
 - Automatic APK, Magisk module, LSPosed, and PixelMask artifact provisioning
 
 ## Important runtime facts
 
-Redroid needs Android Binder support from the host kernel. It does not use `/dev/kvm`. The launcher lets Redroid create its own isolated Binder devices. It also uses an anonymous Docker volume for Android's runtime property area because stock Unraid kernels can omit tmpfs extended attributes. No host directory or ownership setup is required.
+Redroid needs Android Binder support from the host kernel. It does not use `/dev/kvm`. The launcher lets Redroid create its own isolated Binder devices. It uses tmpfs for Android's runtime property area so those boot-scoped files never survive a container restart. No host directory or ownership setup is required.
 
 The stock `redroid/redroid` image is AOSP. It does not include Google Mobile Services, Google Photos, Magisk, or ARM translation. Fairth therefore requires `REDROID_IMAGE` to name an image you built or obtained under licenses that permit those packages. The included x86-64 builder uses Android 11 because its GApps and ARM native-bridge path is the combination its upstream builder documents as working. It adds Google Photos from the pinned OpenGApps package, so Photos is present on first boot.
 
 PixelMask does not replace Magisk or Zygisk. It is an LSPosed module, and LSPosed requires Magisk/Zygisk or an equivalent root framework. PixelMask currently publishes an `arm64-v8a` application. An x86-64 Unraid host therefore needs a Redroid image with a working ARM native bridge as well as GApps and Magisk. `bin/fairth-android build-image` uses a pinned revision of the community `redroid-script` project to build that image locally. Review that third-party input and the applicable package licenses before running it. Fairth does not commit or redistribute the resulting proprietary packages.
 
-Some Unraid kernels also omit pressure-stall information. The Fairth image configures Android 11's legacy low-memory mode and makes its phone-oriented low-memory daemon non-critical, so that unavailable host feature cannot force an Android boot loop. Docker removes the anonymous runtime property volume with the container; the named Android `/data` volume remains persistent.
+Android 11's low-memory daemon requires pressure stall information on current Unraid kernels. Unraid compiles PSI into the kernel but disables it by default, so add `psi=1` to the Unraid boot arguments and reboot before starting Fairth. `bin/fairth-android check` verifies `/proc/pressure/memory` before launching Android. Docker recreates the tmpfs runtime property area on every Android boot; the named Android `/data` volume remains persistent.
 
 References: [Redroid documentation](https://github.com/remote-android/redroid-doc), [Redroid GMS build notes](https://github.com/remote-android/redroid-doc/tree/master/android-builder-docker), [LSPosed installation](https://github.com/LSPosed/LSPosed/wiki/How-to-use-it), and [PixelMask instructions](https://github.com/Xposed-Modules-Repo/com.kinginu.pixelmask).
 
 ## Unraid setup
 
-The host needs rootful Docker, Android Binder support, `git`, Python 3 with `venv`, and `lzip`. Docker Compose is not used. Redroid will not boot in rootless Podman even when the kernel registers Binder.
+The host needs rootful Docker, Android Binder support, PSI enabled with the `psi=1` boot argument, `git`, Python 3 with `venv`, and `lzip`. Docker Compose is not used. Redroid will not boot in rootless Podman even when the kernel registers Binder.
 
 Copy the environment template:
 
@@ -50,7 +50,7 @@ cp .env.example .env
 
 The defaults use three Docker-managed named volumes for application state, Android state, and incoming media. No host directories or `chown` commands are required. To make incoming media directly visible on Unraid, replace `INCOMING_PATH` with an absolute `/mnt/user/...` path.
 
-Set `PUBLIC_BASE_URL` and `ANDROID_VIEWER_URL` to addresses reachable by the intended clients. The application works directly over a trusted LAN, Tailscale IP, or MagicDNS name. Tailscale Serve can add private HTTPS. Optional Traefik labels expose only the web port publicly. See [Networking and TLS](docs/networking.md). Generate the eight-character `ANDROID_VIEWER_PASSWORD` as shown in `.env.example`. Fairth generates and persists the Better Auth secret unless `BETTER_AUTH_SECRET` is explicitly configured.
+Set `PUBLIC_BASE_URL` and `ANDROID_VIEWER_URL` to addresses reachable by the intended clients. The application works directly over a trusted LAN, Tailscale IP, or MagicDNS name. Tailscale Serve can add private HTTPS. Optional Traefik labels expose only the web port publicly. See [Networking and TLS](docs/networking.md). The viewer is passwordless by default so it embeds cleanly in onboarding, and therefore defaults to a loopback host bind. Fairth generates and persists the Better Auth secret unless `BETTER_AUTH_SECRET` is explicitly configured.
 
 Build the local Redroid and Fairth images once. This downloads the official Redroid base and pinned third-party GApps, Magisk, and native-bridge inputs:
 
@@ -75,6 +75,7 @@ docker run -d \
   --restart unless-stopped \
   --network fairth \
   --network-alias android \
+  --tmpfs /dev/__properties__ \
   -v fairth-android-data:/data \
   localhost/fairth-redroid:11-gapps-ndk-magisk \
   androidboot.hardware=redroid \
@@ -101,14 +102,14 @@ docker run -d \
   --env-file .env \
   -e ADB_ENDPOINT=android:5555 \
   -p 3000:3000 \
-  -p 6080:6080 \
+  -p 127.0.0.1:6080:6080 \
   -v fairth-data:/data \
   -v fairth-incoming:/incoming \
   -v "$PWD/artifacts:/artifacts:ro" \
   localhost/fairth:latest
 ```
 
-The wrapper supplies the same Redroid properties using display values from `.env`. Create the owner, then open `/onboarding`. That page verifies automated Android setup and opens the Android screens needed for Google sign-in and Photos consent.
+The wrapper supplies the same Redroid properties using display values from `.env`. Create the owner, then open `/onboarding`. That page verifies automated Android setup and embeds the Android screen needed for Google sign-in.
 
 Google does not provide a supported way for a separate web OAuth callback to inject an account into Android's system account store. The browser view keeps credential entry in Google's Android UI. Fairth never receives or stores the Google password. The persistent Android `/data` mount preserves the resulting account across container restarts.
 
@@ -125,12 +126,12 @@ artifacts/modules/*.zip    LSPosed Zygisk module
 
 Google Photos is part of the Fairth Redroid image. The Android worker detects it through Android's package manager, then hashes the user-supplied artifacts at startup, installs changed APKs, enables Zygisk, installs changed modules, and reboots Android when needed. It enables PixelMask in LSPosed, replaces only PixelMask's scope with `com.kinginu.pixelmask` and `com.google.android.apps.photos`, restarts Android, and verifies the saved state. PixelMask's upstream default is the original Pixel profile, so Fairth does not need to write private PixelMask preferences. Applied artifact state persists, so ordinary restarts do not reinstall it. Use the onboarding page or `bin/fairth-android reconcile` to retry after fixing a missing artifact or Android prerequisite.
 
-The authenticated `/onboarding` page reports every automatic check and opens the remaining UI-only steps in the private Android viewer:
+The authenticated `/onboarding` page reports every automatic check and embeds the private Android viewer for the remaining setup:
 
 1. Complete Google's Android account sign-in.
-2. Open Google Photos and approve backup for `DCIM/Incoming`.
+2. Ask Fairth to configure and verify Google Photos backup. Fairth uses a bounded Android UI flow and writes imported media to `DCIM/Camera`, so Photos treats it as the phone's camera roll.
 
-Google login and Photos consent cannot be injected through a supported API. Fairth leaves them in Google's UI and never receives the Google password. Google login, Photos settings, Magisk modules, LSPosed state, and PixelMask state live under the persistent Android `/data` volume.
+Google login cannot be injected through a supported API. Fairth leaves sign-in in Google's UI and never receives the Google password. After sign-in, Fairth can drive Photos' visible controls to enable backup and records successful verification. Google login, Photos settings, Magisk modules, LSPosed state, and PixelMask state live under the persistent Android `/data` volume.
 
 ## Web app and upload API
 
@@ -140,7 +141,7 @@ All upload routes require a Better Auth device session as `Authorization: Bearer
 
 The same two-container deployment works over LAN and direct Tailscale addresses. Tailscale Serve can proxy the host ports when browser-trusted private HTTPS is preferred. For optional public access, `TRAEFIK_ENABLE=true` attaches only the Fairth application container to Traefik. Cloudflare can provide DNS while Traefik terminates TLS. Exact configurations and security boundaries are documented in [Networking and TLS](docs/networking.md).
 
-The companion requests an eight-character device code, opens Fairth's authenticated approval page, and polls until the owner approves it. Better Auth then issues a one-year revocable session. The owner can inspect and revoke companion sessions at `/devices`; revocation takes effect on the next API request. Auth data and Android data persist in separate named volumes.
+The signed-in onboarding page creates a short-lived, one-use QR challenge. The companion scans and redeems it for a one-year revocable upload session without receiving the owner's credentials. The original device-code approval page remains available as a fallback. The owner can inspect and revoke companion sessions at `/devices`; revocation takes effect on the next API request. Auth data and Android data persist in separate named volumes.
 
 References: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [Traefik Docker routing](https://doc.traefik.io/traefik/routing/providers/docker/), and [Better Auth device authorization](https://better-auth.com/docs/plugins/device-authorization).
 
@@ -180,11 +181,11 @@ npx expo run:android
 
 In the app:
 
-1. Set the remote endpoint to the Tailscale Serve or public Traefik URL.
-2. Optionally set a trusted-LAN endpoint for LAN-first uploads.
-3. Tap **Enroll this device**, sign in as the Fairth owner, and approve the displayed code.
-4. Select albums, or leave all albums unselected to watch the full camera roll.
-5. Enable automatic sync and the desired Wi-Fi, charging, and time-window rules.
+1. Open the signed-in Fairth onboarding page on a computer.
+2. Tap **Scan QR code** in the companion and scan the one-time pairing code.
+3. Allow access to the photos and videos Fairth should back up.
+4. Keep the Wi-Fi-only default, or enable mobile-data backup.
+5. Start automatic backup. **Approve in browser instead** remains available when QR scanning is not practical.
 
 To upload only a few photos, leave automatic sync off and share one or more images to **Fairth Companion** from Android's share sheet. Fairth copies the shared images into its durable queue, schedules an upload using the saved Wi-Fi and charging rules, and closes. This path does not need photo-library permission and does not scan or queue the rest of the camera roll.
 
@@ -213,7 +214,7 @@ Direct health probes:
 curl http://127.0.0.1:3000/health
 ```
 
-`/health` reports web liveness. `bin/fairth-android status` checks the private Android worker readiness endpoint, which returns HTTP 503 until Android has booted and Google Photos is installed. The owner onboarding page additionally checks the Android account registry for the presence of a Google account. It does not read credentials or claim that Photos backup consent is complete.
+`/health` reports web liveness. `bin/fairth-android status` checks the private Android worker readiness endpoint, which returns HTTP 503 until Android has booted and Google Photos is installed. The owner onboarding page additionally checks the Android account registry for the presence of a Google account and reports whether Fairth successfully verified Photos backup. It never reads Google credentials.
 
 Plan for 4 to 8 GB of RAM, 2 to 4 CPU cores, and enough host storage for Android data plus the incoming and archive trees. KVM is not used by Redroid. Binder support and privileged container access are required.
 
@@ -226,7 +227,7 @@ bun install
 bun run check
 ```
 
-For an end-to-end appliance check, upload a small unique image, watch the Android worker log for an `imported` event, confirm the file appears in `DCIM/Incoming`, then verify its backup state in Google Photos. Import success means the MediaStore row exists. Cloud backup remains controlled and reported by Google Photos.
+For an end-to-end appliance check, upload a small unique image, watch the Android worker log for an `imported` event, confirm the file appears in `DCIM/Camera`, then verify its backup state in Google Photos. Import success means the MediaStore row exists. Cloud backup remains controlled and reported by Google Photos.
 
 The companion's Kotlin module can be compiled without a phone after Expo prebuild:
 

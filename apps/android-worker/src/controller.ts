@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { AndroidController, AndroidOperationResult } from "@fairth/android-rpc";
 import type { ReturnTypeAdb } from "./types.js";
+import type { ImportDatabase } from "./database.js";
 
 function operationResult(result: Awaited<ReturnType<ReturnTypeAdb["onboardingAction"]>>): AndroidOperationResult {
   return result.ok ? { ok: true } : { ok: false, message: result.message };
@@ -18,8 +19,9 @@ async function runProvisioningScript(): Promise<AndroidOperationResult> {
   });
 }
 
-export function createAndroidController(adb: ReturnTypeAdb): AndroidController {
+export function createAndroidController(adb: ReturnTypeAdb, database: ImportDatabase): AndroidController {
   let reconciliation: Promise<AndroidOperationResult> | undefined;
+  let photosConfiguration: Promise<AndroidOperationResult> | undefined;
 
   async function reconcileProvisioning(): Promise<AndroidOperationResult> {
     reconciliation ??= runProvisioningScript().finally(() => {
@@ -31,7 +33,13 @@ export function createAndroidController(adb: ReturnTypeAdb): AndroidController {
   return {
     onboarding: adb.onboarding,
     openGoogleAccount: async () => operationResult(await adb.onboardingAction("open_google_account")),
-    openPhotos: async () => operationResult(await adb.onboardingAction("open_photos")),
+    configurePhotos: async () => {
+      photosConfiguration ??= adb.configurePhotos().then(operationResult).finally(() => {
+        photosConfiguration = undefined;
+      });
+      return photosConfiguration;
+    },
+    progress: async () => ({ imports: database.counts(), googlePhotos: await adb.googlePhotosProgress() }),
     reconcileProvisioning,
   };
 }

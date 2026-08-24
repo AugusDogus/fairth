@@ -4,7 +4,7 @@ import { readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { Config } from "./config.js";
 
-export type Candidate = Readonly<{ path: string; size: number }>;
+export type Candidate = Readonly<{ path: string; size: number; mtimeMs: number }>;
 type Observation = Readonly<{ size: number; mtimeMs: number; stableSince: number }>;
 
 const MEDIA_EXTENSIONS = new Set([
@@ -41,7 +41,7 @@ export function createStableScanner(config: Config) {
       if (previous === undefined || previous.size !== info.size || previous.mtimeMs !== info.mtimeMs) {
         observations.set(path, { size: info.size, mtimeMs: info.mtimeMs, stableSince: now });
       } else if (now - previous.stableSince >= config.stableForMs) {
-        candidates.push({ path, size: info.size });
+        candidates.push({ path, size: info.size, mtimeMs: info.mtimeMs });
       }
     }
     for (const path of observations.keys()) if (!present.has(path)) observations.delete(path);

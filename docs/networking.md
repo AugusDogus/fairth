@@ -20,8 +20,10 @@ The endpoints have different exposure requirements:
 | ADB | Private Fairth Docker network only | Never |
 
 The Android viewer provides live control of Android and can display Google sign-in.
-Its eight-character VNC password is defense in depth, not an Internet-facing
-authentication system.
+It is passwordless by default so it can be embedded in the authenticated onboarding
+page without a second prompt. Its host port defaults to loopback and must remain
+behind a trusted LAN, tailnet policy, or SSH tunnel. `ANDROID_VIEWER_PASSWORD` can
+add a VNC prompt when a directly exposed LAN viewer needs defense in depth.
 
 ## Trusted LAN
 
@@ -34,8 +36,10 @@ WEB_BIND_ADDRESS=0.0.0.0
 ANDROID_VIEWER_BIND_ADDRESS=0.0.0.0
 ```
 
-Do not port-forward either raw host port. Use a specific LAN address instead of
-`0.0.0.0` when Fairth should listen on only one host interface.
+The LAN example explicitly overrides the viewer's loopback default. Do not
+port-forward either raw host port. Use a specific LAN address instead of `0.0.0.0`
+when Fairth should listen on only one host interface. Consider setting
+`ANDROID_VIEWER_PASSWORD` when every trusted LAN client should not receive access.
 
 ## Direct Tailscale IP or MagicDNS
 

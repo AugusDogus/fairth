@@ -5,7 +5,7 @@ import { createWebRpcCaller } from "@/trpc/context";
 type WebAndroidAction = AndroidAction | "reconcile_provisioning";
 
 function androidAction(value: string): WebAndroidAction | undefined {
-  if (value === "open_google_account" || value === "open_photos" || value === "reconcile_provisioning") return value;
+  if (value === "open_google_account" || value === "configure_photos" || value === "reconcile_provisioning") return value;
   return undefined;
 }
 
@@ -13,7 +13,7 @@ async function runAndroidAction(request: Request, action: WebAndroidAction) {
   const caller = await createWebRpcCaller(request.headers);
   switch (action) {
     case "open_google_account": return caller.android.openGoogleAccount();
-    case "open_photos": return caller.android.openPhotos();
+    case "configure_photos": return caller.android.configurePhotos();
     case "reconcile_provisioning": return caller.android.reconcileProvisioning();
   }
 }

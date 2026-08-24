@@ -53,6 +53,9 @@ export function parseSessionRequest(value: unknown, maxBytes: number): ParseResu
   const deviceId = optionalString(metadataRecord.deviceId, 128);
   const album = optionalString(metadataRecord.album, 255);
   const capturedAt = optionalString(metadataRecord.capturedAt, 64);
+  if (metadataRecord.capturedAt !== undefined && (capturedAt === undefined || !Number.isFinite(Date.parse(capturedAt)))) {
+    return { ok: false, message: "metadata.capturedAt must be a valid date-time string no longer than 64 characters." };
+  }
   const metadata: UploadMetadata = {
     ...(deviceId === undefined ? {} : { deviceId }),
     ...(album === undefined ? {} : { album }),

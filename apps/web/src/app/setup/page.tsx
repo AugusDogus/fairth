@@ -19,7 +19,6 @@ export default async function SetupPage({ searchParams }: SetupPageProps) {
 
   return (
     <OwnerShell
-      eyebrow="One-time setup"
       title="Create the appliance owner"
       description="This account approves companion phones and revokes their upload sessions. It is separate from the Google account inside Android."
     >

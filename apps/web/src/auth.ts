@@ -21,6 +21,18 @@ export type OwnerSetupResult =
   | Readonly<{ ok: true; headers: Headers }>
   | Readonly<{ ok: false; code: "closed" | "invalid_token" | "in_progress" | "invalid_owner"; message: string }>;
 
+export type CompanionPairing = Readonly<{
+  expiresAt: number;
+  pairingUri: string;
+}>;
+
+type DeviceCodeChallenge = Readonly<{
+  deviceCode: string;
+  expiresIn: number;
+  interval: number;
+  userCode: string;
+}>;
+
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
   return typeof error.code === "string" ? error.code : undefined;
@@ -55,6 +67,27 @@ function equalSecret(actual: string, expected: string): boolean {
   const actualBytes = Buffer.from(actual);
   const expectedBytes = Buffer.from(expected);
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+
+function deviceCodeChallenge(value: unknown): DeviceCodeChallenge {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("The device authorization service returned an invalid challenge.");
+  }
+  const record = Object.fromEntries(Object.entries(value));
+  if (
+    typeof record.device_code !== "string"
+    || typeof record.user_code !== "string"
+    || typeof record.expires_in !== "number"
+    || typeof record.interval !== "number"
+  ) {
+    throw new Error("The device authorization service returned an incomplete challenge.");
+  }
+  return {
+    deviceCode: record.device_code,
+    expiresIn: record.expires_in,
+    interval: record.interval,
+    userCode: record.user_code,
+  };
 }
 
 export async function createAuthService(config: Config) {
@@ -151,9 +184,31 @@ export async function createAuthService(config: Config) {
     }
   }
 
+  async function createCompanionPairing(headers: Headers): Promise<CompanionPairing> {
+    const response = await auth.handler(new Request(new URL("/api/auth/device/code", config.publicBaseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "Fairth web pairing" },
+      body: JSON.stringify({ client_id: companionClientId, scope: "upload" }),
+    }));
+    if (!response.ok) throw new Error(`The device authorization service rejected the pairing request with status ${response.status}.`);
+    const challenge = deviceCodeChallenge(await response.json());
+    await auth.api.deviceVerify({ query: { user_code: challenge.userCode }, headers });
+    await auth.api.deviceApprove({ body: { userCode: challenge.userCode }, headers });
+
+    const expiresAt = Date.now() + challenge.expiresIn * 1000;
+    const pairingUri = new URL("fairth://pair");
+    pairingUri.searchParams.set("v", "1");
+    pairingUri.searchParams.set("endpoint", config.publicBaseUrl);
+    pairingUri.searchParams.set("device_code", challenge.deviceCode);
+    pairingUri.searchParams.set("expires_at", String(expiresAt));
+    pairingUri.searchParams.set("interval", String(challenge.interval));
+    return { expiresAt, pairingUri: pairingUri.toString() };
+  }
+
   return {
     auth,
     companionClientId,
+    createCompanionPairing,
     createOwner,
     ownerSetupUrl,
     close: () => database.close(),

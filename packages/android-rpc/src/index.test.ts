@@ -41,13 +41,18 @@ describe("androidRpcRouter", () => {
     const android: AndroidController = {
       onboarding: async () => onboarding,
       openGoogleAccount: async () => ({ ok: true }),
-      openPhotos: async () => ({ ok: true }),
+      configurePhotos: async () => ({ ok: true }),
       reconcileProvisioning: async () => ({ ok: false, message: "Missing artifact." }),
+      progress: async () => ({
+        imports: { pending: 1, imported: 2, failed: 0, duplicate: 0 },
+        googlePhotos: { state: "idle", detail: "Backup is enabled." },
+      }),
     };
     const caller = androidRpcRouter.createCaller({ android });
 
     expect(await caller.status()).toEqual(onboarding);
-    expect(await caller.openPhotos()).toEqual({ ok: true });
+    expect(await caller.configurePhotos()).toEqual({ ok: true });
+    expect(await caller.progress()).toMatchObject({ imports: { pending: 1, imported: 2 } });
     expect(await caller.reconcileProvisioning()).toEqual({ ok: false, message: "Missing artifact." });
   });
 });

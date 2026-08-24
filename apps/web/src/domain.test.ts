@@ -17,4 +17,10 @@ describe("parseSessionRequest", () => {
     const result = parseSessionRequest({ filename: "video.mp4", size: 101 }, 100);
     expect(result.ok).toBeFalse();
   });
+
+  test("rejects an invalid capture time instead of silently replacing it", () => {
+    const result = parseSessionRequest({ filename: "photo.jpg", size: 42, metadata: { capturedAt: "not-a-date" } }, 100);
+
+    expect(result).toEqual({ ok: false, message: "metadata.capturedAt must be a valid date-time string no longer than 64 characters." });
+  });
 });

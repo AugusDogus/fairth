@@ -61,9 +61,14 @@ async function fixture() {
   const accessToken = tokenBody.access_token;
   return {
     incomingRoot,
-    api: createUploadApi(config, storage, authService),
+    api: createUploadApi(config, storage, authService, async () => ({
+      imports: { pending: 1, imported: 2, failed: 0, duplicate: 0 },
+      googlePhotos: { state: "idle", detail: "Google Photos is idle." },
+    })),
+    authService,
     authorization: { authorization: `Bearer ${accessToken}` },
     config,
+    ownerHeaders,
     revokeCompanion: async () => {
       await authService.auth.api.revokeSession({ body: { token: accessToken }, headers: ownerHeaders });
     },
@@ -75,6 +80,45 @@ async function fixture() {
 }
 
 describe("web boundaries", () => {
+  test("creates a short-lived preapproved companion pairing", async () => {
+    const { authService, config, ownerHeaders, cleanup } = await fixture();
+    try {
+      const pairing = await authService.createCompanionPairing(ownerHeaders);
+      const pairingUri = new URL(pairing.pairingUri);
+      expect(pairingUri.protocol).toBe("fairth:");
+      expect(pairingUri.hostname).toBe("pair");
+      expect(pairingUri.searchParams.get("endpoint")).toBe(config.publicBaseUrl);
+      expect(pairing.expiresAt).toBeGreaterThan(Date.now());
+
+      const deviceCode = pairingUri.searchParams.get("device_code");
+      if (deviceCode === null) throw new Error("Pairing URI did not contain a device code.");
+      const response = await authService.auth.handler(new Request(`${config.publicBaseUrl}/api/auth/device/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "user-agent": "Fairth Companion QR test" },
+        body: JSON.stringify({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id: authService.companionClientId,
+        }),
+      }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ token_type: "Bearer" });
+
+      const reused = await authService.auth.handler(new Request(`${config.publicBaseUrl}/api/auth/device/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "user-agent": "Fairth Companion QR test" },
+        body: JSON.stringify({
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id: authService.companionClientId,
+        }),
+      }));
+      expect(reused.status).toBe(400);
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("accepts same-origin requests through a trusted public proxy", async () => {
     const { config, cleanup } = await fixture();
     try {
@@ -116,13 +160,36 @@ describe("web boundaries", () => {
     }
   });
 
+  test("reports authenticated pipeline progress without claiming Google Photos completion", async () => {
+    const { api, authorization, cleanup } = await fixture();
+    try {
+      const denied = await api.status(new Request("http://127.0.0.1:3000/v1/status"));
+      expect(denied.status).toBe(401);
+
+      const response = await api.status(new Request("http://127.0.0.1:3000/v1/status", { headers: authorization }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        imports: { pending: 1, imported: 2, failed: 0, duplicate: 0 },
+        googlePhotos: { state: "idle", detail: "Google Photos is idle." },
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("publishes a direct upload", async () => {
     const { incomingRoot, api, authorization, cleanup } = await fixture();
     try {
       const body = "hello world";
       const response = await api.direct(new Request("http://127.0.0.1:3000/upload", {
         method: "POST",
-        headers: { ...authorization, "content-length": String(Buffer.byteLength(body)), "x-file-name": "hello world.jpg", "x-device-id": "pixel-8-pro" },
+        headers: {
+          ...authorization,
+          "content-length": String(Buffer.byteLength(body)),
+          "x-captured-at": "2020-01-02T03:04:05.678Z",
+          "x-file-name": "hello world.jpg",
+          "x-device-id": "pixel-8-pro",
+        },
         body,
       }));
       expect(response.status).toBe(201);
@@ -134,6 +201,10 @@ describe("web boundaries", () => {
       expect(media).toBeDefined();
       if (media === undefined) throw new Error("Published media file was not found.");
       expect(await readFile(join(incomingRoot, "ready", media), "utf8")).toBe(body);
+      expect(JSON.parse(await readFile(join(incomingRoot, "ready", `${media}.upload.json`), "utf8"))).toMatchObject({
+        metadata: { capturedAt: "2020-01-02T03:04:05.678Z", deviceId: "pixel-8-pro" },
+        sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+      });
     } finally {
       await cleanup();
     }

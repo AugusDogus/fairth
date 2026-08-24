@@ -8,6 +8,7 @@ export type Config = Readonly<{
   dataDirectory: string;
   incomingRoot: string;
   pollIntervalMs: number;
+  provisioningStateDirectory: string;
   stableForMs: number;
   maxRetries: number;
 }>;
@@ -23,12 +24,13 @@ function positiveInteger(name: string, fallback: number): number {
 export function loadConfig(): Config {
   return {
     adbEndpoint: process.env.ADB_ENDPOINT ?? "android:5555",
-    androidMediaDirectory: process.env.ANDROID_MEDIA_DIRECTORY ?? "/storage/emulated/0/DCIM/Incoming",
+    androidMediaDirectory: process.env.ANDROID_MEDIA_DIRECTORY ?? "/storage/emulated/0/DCIM/Camera",
     googlePhotosPackage: process.env.GOOGLE_PHOTOS_PACKAGE ?? "com.google.android.apps.photos",
     healthPort: positiveInteger("HEALTH_PORT", 3001),
     dataDirectory: resolve(process.env.ANDROID_WORKER_DATA ?? "/data"),
     incomingRoot: resolve(process.env.INCOMING_ROOT ?? "/incoming"),
     pollIntervalMs: positiveInteger("POLL_INTERVAL_MS", 5000),
+    provisioningStateDirectory: resolve(process.env.PROVISIONING_STATE_DIRECTORY ?? "/data/fairth/provisioning"),
     stableForMs: positiveInteger("STABLE_FOR_MS", 15000),
     maxRetries: positiveInteger("MAX_RETRIES", 8),
   };

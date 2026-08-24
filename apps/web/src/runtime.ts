@@ -1,5 +1,6 @@
 import { createAuthService } from "./auth";
 import { loadConfig } from "./config";
+import { createCompanionPresence } from "./presence";
 import { createUploadStorage } from "./storage";
 
 async function initializeRuntime() {
@@ -7,10 +8,12 @@ async function initializeRuntime() {
   const storage = createUploadStorage(config);
   await storage.initialize();
   const authService = await createAuthService(config);
+  const companionPresence = createCompanionPresence(config.authDataRoot);
 
   return {
     authService,
     config,
+    companionPresence,
     storage,
   };
 }

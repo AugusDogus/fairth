@@ -16,7 +16,7 @@ for (const directory of ["ready", "drop", "archive"]) {
 
 const database = createImportDatabase(config.dataDirectory);
 const adb = createAdb(config);
-const android = createAndroidController(adb);
+const android = createAndroidController(adb, database);
 const state: ImporterState = { running: false };
 const importer = createImporter(config, database, adb, state);
 const healthServer = createHealthServer(config.healthPort, adb, database, state, android);
