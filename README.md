@@ -176,8 +176,11 @@ The app is in [`apps/companion`](apps/companion). Install and build it on a mach
 ```bash
 cd apps/companion
 bun install
+cp .env.example .env
 npx expo run:android
 ```
+
+Set `EXPO_PUBLIC_FAIRTH_PRIMARY_ENDPOINT` in `apps/companion/.env` to the appliance URL the companion should use when no saved or scanned endpoint is available. This value is embedded in the app and is not a secret.
 
 In the app:
 

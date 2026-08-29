@@ -11,7 +11,7 @@ export type SyncSettings = Readonly<{
 }>;
 
 export const defaultSettings: SyncSettings = {
-  primaryEndpoint: "https://unraid.example-tailnet.ts.net:3443",
+  primaryEndpoint: process.env.EXPO_PUBLIC_FAIRTH_PRIMARY_ENDPOINT?.trim() ?? "",
   lanEndpoint: "",
   deviceId: "pixel",
   wifiOnly: true,
