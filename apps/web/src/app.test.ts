@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +36,7 @@ async function fixture() {
 
   const codeResponse = await authService.auth.handler(new Request("http://127.0.0.1:3000/api/auth/device/code", {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": "Fairth Companion test" },
+    headers: { "content-type": "application/json", "user-agent": "Fairth Companion/test" },
     body: JSON.stringify({ client_id: authService.companionClientId }),
   }));
   const codeBody: unknown = await codeResponse.json();
@@ -47,7 +48,7 @@ async function fixture() {
   await authService.auth.api.deviceApprove({ body: { userCode: codeBody.user_code }, headers: ownerHeaders });
   const tokenResponse = await authService.auth.handler(new Request("http://127.0.0.1:3000/api/auth/device/token", {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": "Fairth Companion test" },
+    headers: { "content-type": "application/json", "user-agent": "Fairth Companion/test" },
     body: JSON.stringify({
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: codeBody.device_code,
@@ -114,6 +115,29 @@ describe("web boundaries", () => {
         }),
       }));
       expect(reused.status).toBe(400);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("reads active sessions without requiring a fresh owner session", async () => {
+    const { authService, config, ownerHeaders, cleanup } = await fixture();
+    try {
+      const current = await authService.auth.api.getSession({ headers: ownerHeaders });
+      if (current === null) throw new Error("Owner session was not created.");
+      const database = new Database(join(config.authDataRoot, "auth.sqlite"));
+      try {
+        database.query("UPDATE session SET createdAt = ? WHERE token = ?").run(new Date(0).toISOString(), current.session.token);
+      } finally {
+        database.close();
+      }
+
+      await expect(authService.auth.api.listSessions({ headers: ownerHeaders })).rejects.toMatchObject({
+        statusCode: 403,
+        body: { code: "SESSION_NOT_FRESH" },
+      });
+      expect(authService.activeCompanionSessionTokens(current.user.id)).toHaveLength(1);
+      expect(authService.activeSessions(current.user.id)).toContainEqual(expect.objectContaining({ token: current.session.token }));
     } finally {
       await cleanup();
     }

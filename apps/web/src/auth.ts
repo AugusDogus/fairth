@@ -26,6 +26,13 @@ export type CompanionPairing = Readonly<{
   pairingUri: string;
 }>;
 
+type ActiveSession = Readonly<{
+  createdAt: string;
+  expiresAt: string;
+  token: string;
+  userAgent: string | null;
+}>;
+
 type DeviceCodeChallenge = Readonly<{
   deviceCode: string;
   expiresIn: number;
@@ -140,6 +147,13 @@ export async function createAuthService(config: Config) {
 
   const migrations = await getMigrations(auth.options);
   await migrations.runMigrations();
+  const activeSessionStatement = database.query<ActiveSession, [string, string]>(`
+    SELECT createdAt, expiresAt, token, userAgent
+    FROM session
+    WHERE userId = ?
+      AND expiresAt > ?
+    ORDER BY createdAt DESC
+  `);
 
   const ownerRow = database.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM user").get();
   const setupTokenPath = join(config.authDataRoot, ownerSetupFilename);
@@ -205,8 +219,17 @@ export async function createAuthService(config: Config) {
     return { expiresAt, pairingUri: pairingUri.toString() };
   }
 
+  /** Better Auth's listSessions endpoint requires a fresh session, so authenticated pages read through this user-scoped query. */
+  function activeSessions(userId: string): readonly ActiveSession[] {
+    return activeSessionStatement.all(userId, new Date().toISOString());
+  }
+
   return {
     auth,
+    activeCompanionSessionTokens: (userId: string): readonly string[] => activeSessions(userId)
+      .filter((session) => session.userAgent?.startsWith("Fairth Companion/") === true)
+      .map((session) => session.token),
+    activeSessions,
     companionClientId,
     createCompanionPairing,
     createOwner,

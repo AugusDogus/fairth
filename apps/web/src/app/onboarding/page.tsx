@@ -30,9 +30,8 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   const { authService, companionPresence, config } = await getRuntime();
   const current = await authService.auth.api.getSession({ headers: requestHeaders });
   if (current === null) redirect(`/login?next=${encodeURIComponent("/onboarding")}`);
-  const sessions = await authService.auth.api.listSessions({ headers: requestHeaders });
-  const companionSessions = sessions.filter((session) => session.userAgent?.startsWith("Fairth Companion/") === true);
-  const companionReady = (await Promise.all(companionSessions.map((session) => companionPresence.isRecent(session.token)))).some(Boolean);
+  const companionSessionTokens = authService.activeCompanionSessionTokens(current.user.id);
+  const companionReady = (await Promise.all(companionSessionTokens.map((token) => companionPresence.isRecent(token)))).some(Boolean);
   let onboarding: OnboardingResult;
   try {
     onboarding = { ok: true, value: await (await createWebRpcCaller(requestHeaders)).android.status() };

@@ -15,7 +15,7 @@ export default async function DevicesPage({ searchParams }: DevicesPageProps) {
   const { authService } = await getRuntime();
   const current = await authService.auth.api.getSession({ headers: requestHeaders });
   if (current === null) redirect(`/login?next=${encodeURIComponent("/devices")}`);
-  const sessions = await authService.auth.api.listSessions({ headers: requestHeaders });
+  const sessions = authService.activeSessions(current.user.id);
 
   return (
     <OwnerShell title="Authorized devices" description="Revoking a session immediately stops that companion from starting or resuming uploads.">
