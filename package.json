@@ -7,6 +7,7 @@
   "scripts": {
     "build": "bun --filter '@fairth/*' build",
     "check": "bun run test && bun run typecheck && bun run build",
+    "render:diagram": "bun media/render-fairth-flow.ts",
     "test": "bun test apps/*/src packages/*/src",
     "typecheck": "bun --filter '*' typecheck"
   },

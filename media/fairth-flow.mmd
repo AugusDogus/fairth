@@ -1,0 +1,53 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "#ffffff",
+    "fontFamily": "Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "fontSize": "15px",
+    "primaryColor": "#ffffff",
+    "primaryTextColor": "#0a0a0a",
+    "primaryBorderColor": "#e5e5e5",
+    "lineColor": "#a3a3a3",
+    "clusterBkg": "#fafafa",
+    "clusterBorder": "#e5e5e5",
+    "edgeLabelBackground": "#ffffff",
+    "tertiaryColor": "#fafafa"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "htmlLabels": true,
+    "nodeSpacing": 42,
+    "rankSpacing": 70,
+    "padding": 18,
+    "useMaxWidth": false
+  },
+  "themeCSS": "svg, .nodeLabel, .edgeLabel, .cluster-label { font-family: Inter, ui-sans-serif, system-ui, sans-serif !important; } svg { background-color: #ffffff !important; } .node rect { rx: 12px; ry: 12px; } .cluster rect { rx: 18px; ry: 18px; fill: #fafafa !important; stroke: #e5e5e5 !important; } .cluster-label { font-size: 13px; font-weight: 600; letter-spacing: .02em; } .cluster-label .nodeLabel { color: #737373 !important; } .active rect { fill: #0a0a0a !important; stroke: #0a0a0a !important; } .active .nodeLabel { color: #ffffff !important; } .supporting rect { fill: #ffffff !important; stroke: #e5e5e5 !important; } .supporting .nodeLabel { color: #171717 !important; } .edgeLabel { color: #737373 !important; font-size: 12px; } .edgeLabel foreignObject { overflow: visible; } .edgeLabel p { background-color: #ffffff !important; border: 1px solid #e5e5e5; border-radius: 999px; padding: 2px 7px; } .flowchart-link { stroke: #a3a3a3 !important; stroke-width: 1.25px; } marker path { fill: #a3a3a3 !important; stroke: #a3a3a3 !important; }"
+}}%%
+
+flowchart LR
+    subgraph clients["Clients"]
+        direction TB
+        companion["Expo companion"]
+        owner["Owner browser"]
+    end
+
+    subgraph fairth["Fairth"]
+        direction TB
+        uploads["Resumable uploads"] --> worker["MediaStore worker"]
+        onboarding["Private onboarding"]
+    end
+
+    subgraph redroid["Private Android"]
+        direction TB
+        photos["Google Photos"]
+        data["Persistent data"]
+        photos --- data
+    end
+
+    companion -->|HTTPS| uploads
+    owner -->|HTTPS| onboarding
+    worker -->|private ADB| photos
+    onboarding -->|private ADB| photos
+
+    class companion,owner,uploads,worker,onboarding,photos active;
+    class data supporting;
