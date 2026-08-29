@@ -2,12 +2,28 @@
 
 Fairth is a self-hosted photo ingestion appliance. An Expo companion app queues media from a phone, uploads it over HTTP in resumable chunks, and an Android worker places each completed file in Android MediaStore. The official Google Photos Android app remains the only component that uploads to Google Photos.
 
-```text
-                  Non-privileged Fairth container       Privileged Redroid
-                 ┌──────────────────────────────────┐   ┌─────────────────┐
-Expo companion ─▶│ Next.js → /incoming → worker    │──▶│ Android / Photos│
-Owner browser ──▶│ onboarding → scrcpy/noVNC       │ADB│ persistent /data│
-                 └──────────────────────────────────┘   └─────────────────┘
+```mermaid
+flowchart LR
+    companion["Expo companion"]
+    owner["Owner browser"]
+
+    subgraph fairth["Non-privileged Fairth container"]
+        direction TB
+        web["Next.js"] --> incoming["/incoming"] --> worker["Android worker"]
+        onboarding["Onboarding"] --> viewer["scrcpy / noVNC"]
+    end
+
+    subgraph redroid["Privileged Redroid container"]
+        direction TB
+        android["Android + Google Photos"]
+        data["Persistent /data"]
+        android --- data
+    end
+
+    companion --> web
+    owner --> onboarding
+    worker -->|Private ADB| android
+    viewer -->|Private ADB| android
 ```
 
 Fairth deploys as two containers on a private Docker network. The non-privileged application container runs Next.js, the Android worker, and the scrcpy/noVNC viewer. The privileged Redroid container runs only Android. ADB crosses the private network and is never published to the host. The `apps/` and `packages/` boundaries organize the application code without creating more deployment units.
